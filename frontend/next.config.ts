@@ -25,6 +25,15 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   agentRules: false, // do not let `next dev` write an AGENTS.md into the repository
+  experimental: {
+    // The /api rewrite proxy buffers request bodies up to this size (default 10 MB) and silently
+    // truncates larger ones. Keep it above the API's MAX_UPLOAD_MB (default 50) plus multipart
+    // overhead; the API enforces the real limit with a 413.
+    proxyClientMaxBodySize: "100mb",
+    // Default 30 s (idle). A cold API start that loads models, or a non-streaming /chat on a slow
+    // LLM, can take longer; SSE streams stay active anyway (the API sends keep-alives every 15 s).
+    proxyTimeout: 300_000,
+  },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiUrl}/api/:path*` }];
   },

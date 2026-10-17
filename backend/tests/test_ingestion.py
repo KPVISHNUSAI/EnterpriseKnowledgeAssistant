@@ -406,6 +406,17 @@ def test_document_deleted_while_processing(factory, tenant, invalidated):
     assert process_job(job.id, doc.organization_id) is JobStatus.CANCELLED  # job is gone
 
 
+def test_failure_after_deletion_is_not_logged_as_an_error(factory, tenant, caplog):
+    doc = store_document(factory, tenant, GUIDE)
+    job = add_job(doc)
+    remove = delete(Document).where(Document.id == doc.id)  # cascades to the job
+    embedder = Embedder(during=lambda: execute(doc, remove), fail=RuntimeError("boom"))
+    with caplog.at_level(logging.INFO, logger="app.ingestion.runner"):
+        assert process_job(job.id, doc.organization_id, embedder=embedder) is JobStatus.CANCELLED
+    assert "ingestion.document_deleted" in caplog.messages
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
 def test_job_of_another_organization_is_invisible(factory, tenant, other_tenant):
     doc = store_document(factory, tenant, GUIDE)
     job = add_job(doc)

@@ -161,7 +161,8 @@ def _run(
 ) -> JobStatus:
     settings = get_settings()
     with session_scope(claim.organization_id) as db:
-        document = db.get(Document, claim.document_id)
+        # Locked like every other writer, so a concurrent delete waits for this commit.
+        document = db.get(Document, claim.document_id, with_for_update=True)
         if document is None:
             return JobStatus.CANCELLED
         if document.version != claim.document_version:
@@ -410,10 +411,6 @@ def _fail(claim: _Claim, exc: Exception) -> JobStatus:
     }
     if isinstance(exc, EmbeddingError):
         extra["error"] = str(exc)  # our own provider messages; never document text
-    if failure.code == "internal_error":
-        logger.exception("ingestion.unexpected_error", extra=extra)
-    else:
-        logger.warning("ingestion.attempt_failed", extra=extra)
 
     with session_scope(claim.organization_id) as db:
         version = db.scalar(
@@ -425,7 +422,13 @@ def _fail(claim: _Claim, exc: Exception) -> JobStatus:
             .with_for_update()
         ).one_or_none()
         if version is None or job is None:
+            # The document was deleted while this attempt ran: nothing failed.
+            logger.info("ingestion.document_deleted", extra={"attempt": claim.attempts})
             return JobStatus.CANCELLED
+        if failure.code == "internal_error":
+            logger.exception("ingestion.unexpected_error", extra=extra)
+        else:
+            logger.warning("ingestion.attempt_failed", extra=extra)
         if job.status != JobStatus.RUNNING or job.attempts != claim.attempts:
             return JobStatus(job.status)  # another attempt owns the job now
         if version != claim.document_version:
