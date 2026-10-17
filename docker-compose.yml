@@ -1,0 +1,43 @@
+# Local development stack. Host ports are configurable (see .env.example) so they
+# can be moved off ports already used by other processes on this machine.
+#
+#   docker compose up -d postgres redis      # infrastructure only (run apps from source)
+#   docker compose --profile app up -d       # full stack in containers
+name: eka
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev_password}
+      POSTGRES_DB: eka
+      EKA_OWNER_PASSWORD: ${EKA_OWNER_PASSWORD:-eka_owner_dev_password}
+      EKA_APP_PASSWORD: ${EKA_APP_PASSWORD:-eka_app_dev_password}
+    ports:
+      - "127.0.0.1:${EKA_POSTGRES_PORT:-5436}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eka"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${EKA_REDIS_PORT:-6381}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  redisdata:
