@@ -78,13 +78,21 @@ def revoke_session(db: Session, session_id: uuid.UUID) -> None:
 
 
 def revoke_user_sessions(
-    db: Session, user_id: uuid.UUID, *, except_session_id: uuid.UUID | None = None
+    db: Session,
+    user_id: uuid.UUID,
+    *,
+    except_session_id: uuid.UUID | None = None,
+    active_organization_id: uuid.UUID | None = None,
 ) -> None:
+    """Revoke the user's live sessions, optionally only those whose active organization
+    is `active_organization_id` (removal from one organization)."""
     stmt = update(UserSession).where(
         UserSession.user_id == user_id, UserSession.revoked_at.is_(None)
     )
     if except_session_id is not None:
         stmt = stmt.where(UserSession.id != except_session_id)
+    if active_organization_id is not None:
+        stmt = stmt.where(UserSession.active_organization_id == active_organization_id)
     db.execute(stmt.values(revoked_at=utcnow()))
 
 

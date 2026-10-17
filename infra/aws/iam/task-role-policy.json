@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadWriteDeleteDocumentObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/${S3_PREFIX}*"
+    },
+    {
+      "Sid": "HeadBucketForTheReadinessCheck",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}"
+    },
+    {
+      "Sid": "UseTheBucketKeyThroughS3Only",
+      "Effect": "Allow",
+      "Action": ["kms:GenerateDataKey", "kms:Decrypt"],
+      "Resource": "${KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": { "kms:ViaService": "s3.${AWS_REGION}.amazonaws.com" }
+      }
+    }
+  ]
+}

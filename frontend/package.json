@@ -1,0 +1,73 @@
+{
+  "name": "eka-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise Knowledge Assistant web UI (Next.js App Router)",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "gen:api": "npm run gen:api:export && npm run gen:api:types",
+    "gen:api:export": "uv run --directory ../backend python scripts/export_openapi.py ../frontend/src/lib/api/openapi.json",
+    "gen:api:types": "openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@radix-ui/react-alert-dialog": "1.2.1",
+    "@radix-ui/react-dialog": "1.3.1",
+    "@radix-ui/react-dropdown-menu": "2.2.1",
+    "@radix-ui/react-popover": "1.3.1",
+    "@radix-ui/react-tabs": "1.2.1",
+    "@tanstack/react-query": "5.104.4",
+    "lucide-react": "1.59.0",
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-markdown": "10.1.0",
+    "rehype-highlight": "7.0.2",
+    "rehype-sanitize": "6.0.0",
+    "remark-gfm": "4.0.1",
+    "tailwind-merge": "3.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.8",
+    "@types/mdast": "4.0.4",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "10.13.0",
+    "eslint-config-next": "16.4.2",
+    "jsdom": "30.1.3",
+    "openapi-typescript": "7.13.0",
+    "postcss": "8.5.30",
+    "prettier": "3.9.10",
+    "rehype-raw": "7.0.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  },
+  "overrides": {
+    "eslint-plugin-react": {
+      "eslint": "$eslint"
+    },
+    "eslint-plugin-import": {
+      "eslint": "$eslint"
+    },
+    "eslint-plugin-jsx-a11y": {
+      "eslint": "$eslint"
+    }
+  }
+}

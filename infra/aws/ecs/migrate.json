@@ -1,0 +1,39 @@
+{
+  "family": "eka-migrate",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": { "cpuArchitecture": "${CPU_ARCHITECTURE}", "operatingSystemFamily": "LINUX" },
+  "executionRoleArn": "${MIGRATE_EXECUTION_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "migrate",
+      "image": "${BACKEND_IMAGE}",
+      "essential": true,
+      "command": ["alembic", "upgrade", "head"],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "LOG_FORMAT", "value": "json" },
+        { "name": "COOKIE_SECURE", "value": "true" }
+      ],
+      "secrets": [
+        { "name": "SECRET_KEY", "valueFrom": "${APP_SECRET_ARN}:SECRET_KEY::" },
+        { "name": "DATABASE_URL", "valueFrom": "${APP_SECRET_ARN}:DATABASE_URL::" },
+        {
+          "name": "MIGRATION_DATABASE_URL",
+          "valueFrom": "${MIGRATION_SECRET_ARN}:MIGRATION_DATABASE_URL::"
+        }
+      ],
+      "linuxParameters": { "initProcessEnabled": true },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/eka/migrate",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "migrate"
+        }
+      }
+    }
+  ]
+}

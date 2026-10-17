@@ -1,0 +1,67 @@
+{
+  "family": "eka-api",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "2048",
+  "memory": "4096",
+  "runtimePlatform": { "cpuArchitecture": "${CPU_ARCHITECTURE}", "operatingSystemFamily": "LINUX" },
+  "taskRoleArn": "${API_TASK_ROLE_ARN}",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "${BACKEND_IMAGE}",
+      "essential": true,
+      "portMappings": [
+        { "name": "http", "containerPort": 8081, "protocol": "tcp", "appProtocol": "http" }
+      ],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "LOG_FORMAT", "value": "json" },
+        { "name": "LOG_LEVEL", "value": "INFO" },
+        { "name": "PUBLIC_BASE_URL", "value": "${PUBLIC_BASE_URL}" },
+        { "name": "ALLOWED_ORIGINS", "value": "${PUBLIC_BASE_URL}" },
+        { "name": "COOKIE_SECURE", "value": "true" },
+        { "name": "TRUST_PROXY_HEADERS", "value": "true" },
+        { "name": "FORWARDED_ALLOW_IPS", "value": "${VPC_CIDR}" },
+        { "name": "STORAGE_BACKEND", "value": "s3" },
+        { "name": "S3_BUCKET", "value": "${BUCKET_NAME}" },
+        { "name": "S3_REGION", "value": "${AWS_REGION}" },
+        { "name": "S3_PREFIX", "value": "${S3_PREFIX}" },
+        { "name": "S3_SSE", "value": "aws:kms" },
+        { "name": "S3_KMS_KEY_ID", "value": "${KMS_KEY_ARN}" },
+        { "name": "LLM_PROVIDER", "value": "anthropic" },
+        { "name": "HF_HUB_OFFLINE", "value": "1" }
+      ],
+      "secrets": [
+        { "name": "SECRET_KEY", "valueFrom": "${APP_SECRET_ARN}:SECRET_KEY::" },
+        { "name": "DATABASE_URL", "valueFrom": "${APP_SECRET_ARN}:DATABASE_URL::" },
+        { "name": "REDIS_URL", "valueFrom": "${APP_SECRET_ARN}:REDIS_URL::" },
+        { "name": "METRICS_TOKEN", "valueFrom": "${APP_SECRET_ARN}:METRICS_TOKEN::" },
+        { "name": "ANTHROPIC_API_KEY", "valueFrom": "${APP_SECRET_ARN}:ANTHROPIC_API_KEY::" }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://127.0.0.1:8081/api/v1/health', timeout=3)"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 120
+      },
+      "stopTimeout": 120,
+      "linuxParameters": { "initProcessEnabled": true },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/eka/api",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}

@@ -98,5 +98,14 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     root.setLevel(level.upper())
     # Uvicorn's access log duplicates our request log line.
     logging.getLogger("uvicorn.access").disabled = True
-    for noisy in ("httpx", "httpcore", "botocore", "urllib3", "sentence_transformers"):
+    # HTTP clients and the LLM SDKs log request bodies (prompts, documents) at DEBUG.
+    for noisy in (
+        "httpx",
+        "httpx2",
+        "httpcore",
+        "anthropic",
+        "botocore",
+        "urllib3",
+        "sentence_transformers",
+    ):
         logging.getLogger(noisy).setLevel(logging.WARNING)

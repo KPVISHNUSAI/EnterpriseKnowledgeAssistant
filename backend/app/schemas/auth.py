@@ -15,7 +15,8 @@ def _normalize_email(value: str) -> str:
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
+    # Length policy (PASSWORD_MIN_LENGTH) is enforced by the service: 422 weak_password.
+    password: str = Field(min_length=1, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
     organization_name: str | None = Field(
         default=None,
@@ -56,7 +57,7 @@ class UpdateProfileRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)  # policy: see RegisterRequest
 
 
 class UserOut(Schema):

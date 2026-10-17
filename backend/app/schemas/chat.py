@@ -70,6 +70,9 @@ class CitationOut(BaseModel):
     page_number: int | None = None
     section_title: str | None = None
     excerpt: str | None = Field(default=None, description="Best supporting sentence.")
+    redacted: bool = Field(
+        default=False, description="True when the caller can no longer read the document."
+    )
 
 
 class MessageOut(BaseModel):
@@ -111,6 +114,9 @@ class StreamMetaEvent(BaseModel):
 
 class StreamSourcesEvent(BaseModel):
     sources: list[SourceRef]
+    search_query: str | None = Field(
+        default=None, description="What retrieval searched for (rewritten for follow-ups)."
+    )
 
 
 class StreamTokenEvent(BaseModel):

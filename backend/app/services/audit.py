@@ -24,6 +24,7 @@ class AuditAction(StrEnum):
     AUTH_LOGOUT = "auth.logout"
     AUTH_PASSWORD_CHANGED = "auth.password_changed"  # noqa: S105 - not a secret
     AUTH_ORGANIZATION_SWITCHED = "auth.organization_switched"
+    ORG_UPDATED = "organization.updated"
     ORG_MEMBER_ROLE_CHANGED = "organization.member_role_changed"
     ORG_MEMBER_REMOVED = "organization.member_removed"
     ORG_INVITATION_CREATED = "organization.invitation_created"

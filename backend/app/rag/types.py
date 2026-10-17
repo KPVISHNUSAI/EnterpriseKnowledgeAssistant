@@ -154,7 +154,10 @@ class AnswerResult:
     model: str | None = None
     usage: TokenUsage = field(default_factory=TokenUsage)
     rewrite_usage: TokenUsage | None = None
+    rewrite_model: str | None = None  # model that produced the rewrite (usage reporting)
     timings_ms: dict[str, float] = field(default_factory=dict)
+    # Generation flags: truncated (stop_reason max_tokens), cancelled, error {kind, retryable}.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

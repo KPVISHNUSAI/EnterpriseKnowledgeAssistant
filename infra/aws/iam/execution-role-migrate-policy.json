@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRuntimeAndMigrationSecrets",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": ["${APP_SECRET_ARN}", "${MIGRATION_SECRET_ARN}"]
+    },
+    {
+      "Sid": "DecryptSecretsWithTheCustomerManagedKey",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "${SECRETS_KMS_KEY_ARN}",
+      "Condition": {
+        "StringEquals": { "kms:ViaService": "secretsmanager.${AWS_REGION}.amazonaws.com" }
+      }
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 UV := uv run --directory backend
 API_PORT ?= 8081
 
-.PHONY: help check-ports infra-up infra-down migrate api worker beat test test-unit lint format typecheck check
+.PHONY: help check-ports infra-up infra-down docker-build up-app down-app migrate api worker beat test test-unit lint format typecheck check
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -17,6 +17,15 @@ infra-up: ## Start PostgreSQL (pgvector) and Redis in Docker
 infra-down: ## Stop the Docker services (data volumes are kept)
 	docker compose down
 
+docker-build: ## Build the backend and frontend images
+	docker compose --profile app build
+
+up-app: ## Run the full stack in containers (migrates, then starts api/worker/beat/frontend)
+	docker compose --profile app up -d --build
+
+down-app: ## Stop the full stack including postgres and redis (data volumes are kept)
+	docker compose --profile app down
+
 migrate: ## Apply database migrations (as the schema owner role)
 	$(UV) alembic upgrade head
 
@@ -24,8 +33,8 @@ api: ## Run the API with auto-reload
 	python3 scripts/check_ports.py $(API_PORT)
 	$(UV) uvicorn app.main:create_app --factory --reload --host 127.0.0.1 --port $(API_PORT)
 
-worker: ## Run the ingestion/maintenance worker
-	$(UV) celery -A app.worker.celery_app worker -Q ingestion,maintenance -l INFO
+worker: ## Run the ingestion/maintenance worker (solo pool: prefork cannot run on macOS)
+	$(UV) celery -A app.worker.celery_app worker -Q ingestion,maintenance --pool solo -l INFO
 
 beat: ## Run the periodic scheduler (stale-job reaper, retention)
 	$(UV) celery -A app.worker.celery_app beat -l INFO

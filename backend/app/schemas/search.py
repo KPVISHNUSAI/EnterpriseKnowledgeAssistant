@@ -9,7 +9,8 @@ from app.core.filetypes import FileType
 
 
 class SearchFilters(BaseModel):
-    """Narrow the search. Always intersected with what the caller may read."""
+    """Narrow the search. Always intersected with what the caller may read; ids the caller
+    cannot read match nothing. A missing or empty list means no filter."""
 
     workspace_ids: list[uuid.UUID] | None = Field(default=None, max_length=100)
     document_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)

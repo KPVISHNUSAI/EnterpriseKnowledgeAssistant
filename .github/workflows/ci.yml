@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg17
+        env:
+          POSTGRES_PASSWORD: ci-only-postgres-password # throwaway service container
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      # pyproject.toml sets python-downloads = "never"; "manual" still allows the explicit
+      # `uv python install` below.
+      UV_PYTHON_DOWNLOADS: manual
+      # conftest.py creates the eka_owner/eka_app roles and the test database through the
+      # admin URL, then runs the Alembic migrations.
+      EKA_POSTGRES_PORT: "5432"
+      TEST_ADMIN_DATABASE_URL: postgresql+psycopg://postgres:ci-only-postgres-password@localhost:5432/postgres
+      TEST_REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.20" # same as backend/Dockerfile
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install Python (version from backend/.python-version)
+        run: uv python install
+      - name: Check that uv.lock matches pyproject.toml
+        run: uv lock --check
+      # Dev group only: tests use the hashing embedder, so no torch (local-models extra).
+      - run: uv sync --frozen
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen mypy
+      - run: uv run --frozen pytest -m "not slow"
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24 # LTS; the project needs Node 22 or newer
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Build only (push: false): proves the images build from a clean checkout.
+      - name: Build backend image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          push: false
+          tags: eka-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          push: false
+          tags: eka-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+  infra:
+    name: Compose and AWS templates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate docker-compose.yml (full-stack profile)
+        run: cp .env.example .env && docker compose --profile app config --quiet
+      - name: Validate JSON syntax of the AWS templates
+        run: find infra/aws -name '*.json' -print0 | xargs -0 -n1 jq empty

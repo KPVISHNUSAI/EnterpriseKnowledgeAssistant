@@ -2,15 +2,25 @@
 source of truth, jobs are claimed with a database lease, and a periodic reaper re-queues
 work whose message was lost (e.g. Redis restart, enqueue failure after commit).
 
-    celery -A app.worker.celery_app worker -Q ingestion,maintenance -l INFO
+    celery -A app.worker.celery_app worker -Q ingestion,maintenance --concurrency 1 -l INFO
     celery -A app.worker.celery_app beat -l INFO
+
+One job at a time per worker; scale with more worker containers (docs/INGESTION.md). On
+macOS use `--pool solo`: billiard starts prefork children with spawn there, which Celery's
+prefork pool cannot run tasks in.
 """
 
 from __future__ import annotations
 
-from celery import Celery
+import logging
+from typing import Any
+
+from celery import Celery, signals
+from celery.schedules import crontab
+from prometheus_client import start_http_server
 
 from app.core.config import get_settings
+from app.core.logging import configure_logging
 
 settings = get_settings()
 
@@ -38,8 +48,31 @@ celery_app.conf.update(
         },
         "apply-retention-policy": {
             "task": "eka.maintenance.apply_retention",
-            "schedule": 6 * 3600.0,
+            # Wall clock, not an interval: beat keeps no state across restarts, and an
+            # interval would restart its 6-hour countdown on every deploy.
+            "schedule": crontab(minute=15, hour="*/6"),
         },
     },
     timezone="UTC",
 )
+
+
+@signals.setup_logging.connect
+def _configure_logging(**_: Any) -> None:
+    """Worker and beat log like the API (structured JSON) instead of Celery's format."""
+    configure_logging(settings.log_level, settings.log_format)
+
+
+@signals.worker_process_init.connect
+def _start_metrics_server(**_: Any) -> None:
+    """Serve Prometheus metrics from the process that executes tasks: a prefork child, or
+    the main process with --pool solo. Sent once per pool process, so with concurrency
+    above 1 only the first process gets the port."""
+    if not settings.metrics_enabled:
+        return
+    try:
+        start_http_server(settings.worker_metrics_port)
+    except OSError:
+        logging.getLogger(__name__).warning(
+            "worker.metrics_port_in_use", extra={"port": settings.worker_metrics_port}
+        )

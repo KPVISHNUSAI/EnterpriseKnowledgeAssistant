@@ -1,0 +1,46 @@
+{
+  "family": "eka-beat",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": { "cpuArchitecture": "${CPU_ARCHITECTURE}", "operatingSystemFamily": "LINUX" },
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "beat",
+      "image": "${BACKEND_IMAGE}",
+      "essential": true,
+      "command": [
+        "celery",
+        "-A",
+        "app.worker.celery_app",
+        "beat",
+        "-l",
+        "INFO",
+        "--schedule",
+        "/tmp/celerybeat-schedule"
+      ],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "LOG_FORMAT", "value": "json" },
+        { "name": "LOG_LEVEL", "value": "INFO" },
+        { "name": "COOKIE_SECURE", "value": "true" }
+      ],
+      "secrets": [
+        { "name": "SECRET_KEY", "valueFrom": "${APP_SECRET_ARN}:SECRET_KEY::" },
+        { "name": "DATABASE_URL", "valueFrom": "${APP_SECRET_ARN}:DATABASE_URL::" },
+        { "name": "REDIS_URL", "valueFrom": "${APP_SECRET_ARN}:REDIS_URL::" }
+      ],
+      "linuxParameters": { "initProcessEnabled": true },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/eka/beat",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "beat"
+        }
+      }
+    }
+  ]
+}

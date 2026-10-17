@@ -1,0 +1,57 @@
+{
+  "family": "eka-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "2048",
+  "memory": "4096",
+  "runtimePlatform": { "cpuArchitecture": "${CPU_ARCHITECTURE}", "operatingSystemFamily": "LINUX" },
+  "taskRoleArn": "${WORKER_TASK_ROLE_ARN}",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "${BACKEND_IMAGE}",
+      "essential": true,
+      "command": [
+        "celery",
+        "-A",
+        "app.worker.celery_app",
+        "worker",
+        "-Q",
+        "ingestion,maintenance",
+        "--concurrency",
+        "1",
+        "-l",
+        "INFO"
+      ],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "LOG_FORMAT", "value": "json" },
+        { "name": "LOG_LEVEL", "value": "INFO" },
+        { "name": "COOKIE_SECURE", "value": "true" },
+        { "name": "STORAGE_BACKEND", "value": "s3" },
+        { "name": "S3_BUCKET", "value": "${BUCKET_NAME}" },
+        { "name": "S3_REGION", "value": "${AWS_REGION}" },
+        { "name": "S3_PREFIX", "value": "${S3_PREFIX}" },
+        { "name": "S3_SSE", "value": "aws:kms" },
+        { "name": "S3_KMS_KEY_ID", "value": "${KMS_KEY_ARN}" },
+        { "name": "HF_HUB_OFFLINE", "value": "1" }
+      ],
+      "secrets": [
+        { "name": "SECRET_KEY", "valueFrom": "${APP_SECRET_ARN}:SECRET_KEY::" },
+        { "name": "DATABASE_URL", "valueFrom": "${APP_SECRET_ARN}:DATABASE_URL::" },
+        { "name": "REDIS_URL", "valueFrom": "${APP_SECRET_ARN}:REDIS_URL::" }
+      ],
+      "stopTimeout": 120,
+      "linuxParameters": { "initProcessEnabled": true },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/eka/worker",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}

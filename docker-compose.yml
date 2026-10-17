@@ -3,7 +3,24 @@
 #
 #   docker compose up -d postgres redis      # infrastructure only (run apps from source)
 #   docker compose --profile app up -d       # full stack in containers
+#                                            (reads .env: cp .env.example .env first)
 name: eka
+
+# Shared by every service that runs the backend image (migrate, api, worker, beat).
+# .env supplies the application settings. The environment block below overrides what
+# must differ inside the compose network, where services reach each other by name
+# instead of localhost. Passwords are embedded in URLs, so keep them URL-safe.
+x-backend: &backend
+  profiles: ["app"]
+  build: ./backend
+  image: eka-backend:dev
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://eka_app:${EKA_APP_PASSWORD:-eka_app_dev_password}@postgres:5432/eka
+    MIGRATION_DATABASE_URL: postgresql+psycopg://eka_owner:${EKA_OWNER_PASSWORD:-eka_owner_dev_password}@postgres:5432/eka
+    REDIS_URL: redis://redis:6379/0
+    LOCAL_STORAGE_PATH: /var/lib/eka/storage
+  init: true
 
 services:
   postgres:
@@ -38,6 +55,124 @@ services:
       timeout: 3s
       retries: 20
 
+  # One-shot: applies the Alembic migrations as the schema-owner role, then exits.
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${EKA_API_PORT:-8081}:8081"
+    volumes:
+      - storage:/var/lib/eka/storage
+      - hf-cache:/var/lib/eka/huggingface
+    # /api/v1/health is liveness only (it checks no dependency). The generous start period
+    # covers a cold start, which imports torch and the model libraries.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8081/api/v1/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 6
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Ingestion and maintenance queues. Prefork with one child: one job at a time per
+  # container, and Celery enforces the task time limits (the solo pool cannot). Scale with
+  # `docker compose --profile app up -d --scale worker=N`.
+  worker:
+    <<: *backend
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "ingestion,maintenance", "--concurrency", "1", "-l", "INFO"]
+    restart: unless-stopped
+    volumes:
+      - storage:/var/lib/eka/storage
+      - hf-cache:/var/lib/eka/huggingface
+    # The pool child serves /metrics from its own thread, so the check passes while a
+    # long job runs and fails when the child is gone.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request as u; u.urlopen('http://127.0.0.1:' + os.environ.get('WORKER_METRICS_PORT', '9101') + '/metrics', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Exactly one scheduler. The schedule file goes to /tmp because /app is read-only for
+  # the non-root user. Beat has no endpoint to probe, so it has no health check.
+  beat:
+    <<: *backend
+    command: ["celery", "-A", "app.worker.celery_app", "beat", "-l", "INFO", "--schedule", "/tmp/celerybeat-schedule"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # Built from frontend/Dockerfile. The container must listen on port 3000. If you
+  # change EKA_FRONTEND_PORT, update PUBLIC_BASE_URL and ALLOWED_ORIGINS in .env too.
+  # next.config.ts reads API_INTERNAL_URL when Next.js builds (rewrites are fixed at
+  # build time), so it is passed as a build argument as well as at run time.
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+      args:
+        API_INTERNAL_URL: http://api:8081
+    image: eka-frontend:dev
+    init: true
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://api:8081
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${EKA_FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   pgdata:
   redisdata:
+  storage:
+  hf-cache:

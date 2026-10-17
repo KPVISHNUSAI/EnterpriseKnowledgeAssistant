@@ -1,0 +1,10 @@
+# Allow-list: only what the Dockerfile copies reaches the build context. This keeps
+# .env files, local storage (var/), virtualenvs, caches and tests out of the image.
+*
+!pyproject.toml
+!uv.lock
+!.python-version
+!alembic.ini
+!alembic/
+!app/
+**/__pycache__

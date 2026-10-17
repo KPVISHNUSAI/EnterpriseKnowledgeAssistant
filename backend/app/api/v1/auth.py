@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Path, Request, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_principal, get_request_meta, rate_limit_ip
@@ -106,7 +106,7 @@ def update_profile(
     return auth_service.update_profile(db, principal, body, meta=meta)
 
 
-@router.post("/me/password", status_code=204, responses=errors(401, 403, 422))
+@router.post("/me/password", status_code=204, responses=errors(401, 403, 422, 429))
 def change_password(
     body: ChangePasswordRequest,
     principal: Principal = Depends(get_principal),
@@ -134,7 +134,9 @@ def switch_organization(
     responses=errors(404, 429),
     dependencies=[rate_limit_ip("invitation_preview", "rate_limit_login_per_minute")],
 )
-def preview_invitation(token: str, db: Session = Depends(get_db)) -> InvitationPreview:
+def preview_invitation(
+    token: str = Path(min_length=1, max_length=200), db: Session = Depends(get_db)
+) -> InvitationPreview:
     """Public: describe a pending invitation (404 if unknown, expired, revoked or used)."""
     return auth_service.preview_invitation(db, token)
 

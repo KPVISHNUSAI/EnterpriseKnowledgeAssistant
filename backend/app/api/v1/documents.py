@@ -35,7 +35,7 @@ _upload_limit = rate_limit_user("upload", "rate_limit_upload_per_minute")
     "/upload",
     response_model=DocumentUploadResponse,
     status_code=201,
-    responses=errors(401, 403, 404, 409, 413, 415, 422, 429),
+    responses=errors(401, 403, 404, 409, 413, 415, 422, 429, 503),
     dependencies=[_upload_limit],
 )
 def upload_document(
@@ -147,7 +147,7 @@ def reindex_document(
     "/{document_id}/file",
     response_model=DocumentUploadResponse,
     status_code=202,
-    responses=errors(401, 403, 404, 409, 413, 415, 422, 429),
+    responses=errors(401, 403, 404, 409, 413, 415, 422, 429, 503),
     dependencies=[_upload_limit],
 )
 def replace_document_file(
@@ -180,7 +180,7 @@ def get_document_status(
     responses={
         200: {"description": "The original file", "content": {"application/octet-stream": {}}},
         307: {"description": "Redirect to a short-lived presigned S3 URL"},
-        **errors(401, 404),
+        **errors(401, 404, 503),
     },
 )
 def download_document(

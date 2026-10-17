@@ -1,0 +1,44 @@
+{
+  "family": "eka-frontend",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": { "cpuArchitecture": "${CPU_ARCHITECTURE}", "operatingSystemFamily": "LINUX" },
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "frontend",
+      "image": "${FRONTEND_IMAGE}",
+      "essential": true,
+      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "3000" },
+        { "name": "HOSTNAME", "value": "0.0.0.0" },
+        { "name": "API_INTERNAL_URL", "value": "http://api:8081" }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "linuxParameters": { "initProcessEnabled": true },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/eka/frontend",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "frontend"
+        }
+      }
+    }
+  ]
+}
