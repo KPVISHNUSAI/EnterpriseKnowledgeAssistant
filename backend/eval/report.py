@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,6 @@ def write_report(out_dir: Path) -> Path:
 
 
 def render(name: str, runs: dict[str, dict[str, Any]]) -> str:
-    first = next(iter(runs.values()))
     lines = [
         f"# Evaluation report: {name}",
         "",
@@ -42,9 +41,9 @@ def render(name: str, runs: dict[str, dict[str, Any]]) -> str:
         "docs/EVALUATION.md for their definitions and limits.",
         "",
         *_runs(runs),
-        *_environment(first, runs),
-        *_settings(first),
-        *_dataset(first),
+        *_environment(runs),
+        *_settings(runs),
+        *_dataset(runs),
     ]
     if "retrieval.json" in runs:
         lines += _retrieval(runs["retrieval.json"])
@@ -132,25 +131,12 @@ def _runs(runs: dict[str, dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _environment(first: dict[str, Any], runs: dict[str, dict[str, Any]]) -> list[str]:
-    env = first["environment"]
-    packages = ", ".join(f"{k} {v}" for k, v in env["packages"].items() if v)
-    models = ", ".join(
-        f"{model} @ {(rev or 'unknown')[:12]}" for model, rev in env["model_revisions"].items()
-    )
-    memory = f"{env['memory_gb']:.0f} GB" if env.get("memory_gb") else "unknown memory"
-    lines = [
-        "## Environment",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| Machine | {env['cpu']}, {env['cpu_count']} CPUs, {memory} ({env['platform']}) |",
-        f"| Python | {env['python']} |",
-        f"| PostgreSQL / pgvector | {env['postgres']} / {env['pgvector']} |",
-        f"| Model device | {env['device']} |",
-        f"| Local models (Hugging Face snapshot) | {models} |",
-        f"| Packages | {packages} |",
-        f"| Git | {env['git_commit']}{' with uncommitted changes' if env['git_dirty'] else ''} |",
+def _environment(runs: dict[str, dict[str, Any]]) -> list[str]:
+    rows = {file: _environment_rows(data["environment"]) for file, data in runs.items()}
+    lines = ["## Environment", "", "| | |", "|---|---|"]
+    lines += [
+        f"| {label} | {_across({file: values[label] for file, values in rows.items()})} |"
+        for label in next(iter(rows.values()))
     ]
     for file, data in runs.items():
         llm = data.get("llm")
@@ -174,36 +160,82 @@ def _environment(first: dict[str, Any], runs: dict[str, dict[str, Any]]) -> list
     return [*lines, ""]
 
 
-def _settings(first: dict[str, Any]) -> list[str]:
+def _environment_rows(env: dict[str, Any]) -> dict[str, str]:
+    packages = ", ".join(f"{k} {v}" for k, v in env["packages"].items() if v)
+    models = ", ".join(
+        f"{model} @ {(rev or 'unknown')[:12]}" for model, rev in env["model_revisions"].items()
+    )
+    memory = f"{env['memory_gb']:.0f} GB" if env.get("memory_gb") else "unknown memory"
+    return {
+        "Machine": f"{env['cpu']}, {env['cpu_count']} CPUs, {memory} ({env['platform']})",
+        "Python": env["python"],
+        "PostgreSQL / pgvector": f"{env['postgres']} / {env['pgvector']}",
+        "Model device": env["device"],
+        "Local models (Hugging Face snapshot)": models,
+        "Packages": packages,
+        "Git": env["git_commit"] + (" with uncommitted changes" if env["git_dirty"] else ""),
+    }
+
+
+def _settings(runs: dict[str, dict[str, Any]]) -> list[str]:
+    keys = dict.fromkeys(key for data in runs.values() for key in data["settings"])
     lines = ["## Settings", "", "| Setting | Value |", "|---|---|"]
-    lines += [f"| `{key}` | `{value}` |" for key, value in first["settings"].items()]
+    for key in keys:
+        values = {
+            file: f"`{data['settings'][key]}`" if key in data["settings"] else "n/a"
+            for file, data in runs.items()
+        }
+        lines.append(f"| `{key}` | {_across(values)} |")
     return [*lines, ""]
 
 
-def _dataset(first: dict[str, Any]) -> list[str]:
-    index = first["index"]
-    ids = first["case_ids"]
-    formats = ", ".join(f"{count} {fmt.upper()}" for fmt, count in index["formats"].items())
-    mismatches = {
-        person: check["mismatch"]
-        for person, check in index["access_check"].items()
-        if check["mismatch"]
-    }
-    access = (
-        "matches the documented rule for every demo user"
-        if not mismatches
-        else f"DIFFERS from the documented rule: {mismatches}"
-    )
+def _dataset(runs: dict[str, dict[str, Any]]) -> list[str]:
+    def dataset(data: dict[str, Any]) -> str:
+        return f"`{data['dataset']}`: {len(data['case_ids'])} cases"
+
+    def chunks(data: dict[str, Any]) -> str:
+        index = data["index"]
+        formats = ", ".join(f"{count} {fmt.upper()}" for fmt, count in index["formats"].items())
+        return (
+            f"{index['documents']} documents ({formats}), {index['chunks']} chunks, "
+            f"{index['chunk_tokens']} estimated tokens"
+        )
+
+    def ingestion(data: dict[str, Any]) -> str:
+        return _seconds(data["index"]["ingestion_seconds"])
+
+    def access(data: dict[str, Any]) -> str:
+        mismatches = {
+            person: check["mismatch"]
+            for person, check in data["index"]["access_check"].items()
+            if check["mismatch"]
+        }
+        if not mismatches:
+            return "matches the documented rule for every demo user"
+        return f"DIFFERS from the documented rule: {mismatches}"
+
+    def each(value: Callable[[dict[str, Any]], str]) -> str:
+        return _across({file: value(data) for file, data in runs.items()})
+
     return [
         "## Dataset and index",
         "",
-        f"- Dataset `{first['dataset']}`: {len(ids)} cases in this run.",
-        f"- Index: {index['documents']} documents ({formats}), {index['chunks']} chunks, "
-        f"{index['chunk_tokens']} estimated tokens; corpus loaded and ingested in "
-        f"{_seconds(index['ingestion_seconds'])}.",
-        f"- Access check: the application's readable-document set {access}.",
+        f"- Dataset {each(dataset)}.",
+        f"- Index: {each(chunks)}; corpus loaded and ingested in {each(ingestion)}.",
+        f"- Access check: the application's readable-document set {each(access)}.",
         "",
     ]
+
+
+def _across(values: dict[str, str]) -> str:
+    """The value every result file shares, or each value followed by the files it is from:
+    runs made at different commits or with different settings must not look alike."""
+    files: dict[str, list[str]] = {}
+    for file, value in values.items():
+        files.setdefault(value, []).append(file)
+    if len(files) == 1:
+        return next(iter(files))
+    return "; ".join(f"{value} ({_quoted(names)})" for value, names in files.items())
 
 
 # --- Retrieval --------------------------------------------------------------------------------

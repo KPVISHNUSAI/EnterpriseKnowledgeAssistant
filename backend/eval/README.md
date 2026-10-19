@@ -26,7 +26,7 @@ uv run python -m eval --help
 uv run python -m eval run                     # retrieval + extractive generator, every case
 uv run python -m eval run --no-retrieval --no-extractive --llm-configs hybrid_rerank
 uv run python -m eval run --cases fact-01,inj-07 --llm-configs hybrid_rerank   # a few cases
-uv run python -m eval report --name 2026-10-18  # re-render report.md from the JSON files
+uv run python -m eval report --name 2026-10-19  # re-render report.md from the JSON files
 ```
 
 `run` writes into `reports/<name>/`; `--name` defaults to today's date. It produces:
@@ -41,12 +41,12 @@ file.
 
 Run one evaluation at a time, because every run resets the evaluation database.
 
-On an Apple M4 that other jobs were also loading, the 2026-10-18 run took:
+On an Apple M4 that other jobs were also loading, the 2026-10-19 run took:
 
-- 41 s to load and ingest the corpus
-- 3.5 min for retrieval
-- 78 s for the extractive generator
-- 30–170 s per case for llama3.1:8b (see the report for the measured total)
+- 8 s to load and ingest the corpus (31 s at the start of the LLM part)
+- 20 s for retrieval
+- 21 s for the extractive generator
+- 59.7 min for llama3.1:8b on three configurations: 255 answers, 12–15 s p50 each
 
 ### Environment variables
 
@@ -195,7 +195,7 @@ examples.
 ## Dataset changelog
 
 **v1.** Label fixes made after inspecting the first full development run (22:54 UTC on
-2026-10-17; its results were discarded) and before the reported run `2026-10-18`:
+2026-10-17; its results were discarded) and before any reported run:
 
 - **`inj-07`**: the key fact `purchase order` became `approved purchase order`. The
   bare phrase also matched the injected paragraph ("... without a purchase order"), so an

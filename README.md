@@ -376,6 +376,22 @@ Each run writes JSON results and a Markdown report to `backend/eval/reports/<dat
 report records the machine, the package and model versions, every setting and the exact
 commands.
 
+Measured on 2026-10-19 ([report](backend/eval/reports/2026-10-19/report.md); analysis
+and manual inspection in [docs/EVALUATION.md](docs/EVALUATION.md#results)):
+
+* **Retrieval.**
+  * Recall@1 / MRR: vector-only 0.754 / 0.879, keyword-only 0.746 / 0.891, hybrid
+    0.790 / 0.913, hybrid + rerank 0.913 / 0.986.
+  * Recall@10 is 1.000 for every configuration, because the corpus is small.
+  * No configuration returned a chunk the asker may not read.
+* **Answers by llama3.1:8b** (local, via Ollama):
+  * Fact recall 0.94–0.97 and abstention F1 0.94–0.97 across vector, hybrid and
+    hybrid + rerank retrieval. The extractive fallback scores 0.62–0.64 and 0.67–0.69.
+  * No permission leak, in answers or in the 90 recorded model requests per configuration.
+  * Prompt injection is the weak point: the model resisted 4 or 5 of the 7 injection
+    cases. The citation validator removed every forged citation.
+  * 12–15 s p50 per answer on the laptop.
+
 ## Security model
 
 * **Tenant isolation.** Every tenant table has `FORCE ROW LEVEL SECURITY` and a policy on
@@ -453,7 +469,7 @@ Production issues (ALB timeouts, migrations, secrets) are covered in
 
 Tested, with results reported from actual runs:
 
-* **Backend.** 1091 tests: unit tests, and integration tests against PostgreSQL with pgvector
+* **Backend.** 1092 tests: unit tests, and integration tests against PostgreSQL with pgvector
   and Redis. They include the real embedding model and cross-encoder, and a live Ollama
   server for the OpenAI-compatible provider. CI runs everything except the real-model tests
   on every push.
@@ -461,7 +477,8 @@ Tested, with results reported from actual runs:
 * **End-to-end.** 27 Playwright tests in Chromium against the real stack (API, worker,
   frontend, PostgreSQL, Redis). They cover permissions, cross-tenant access, XSS payloads,
   CSRF, streaming and Stop. The run also checks that the service logs contain no passwords,
-  keys, document text or questions. All 27 passed in each of two consecutive local runs.
+  keys, document text or questions. All 27 passed in each of two consecutive local runs
+  (macOS) and in GitHub Actions (Ubuntu).
 * **Container stack.** The full stack (`make up-app`) was tested by hand: register, upload,
   ingestion, hybrid search with reranking, and a streamed answer with a verified citation.
 * **RAG evaluation**, as described above.

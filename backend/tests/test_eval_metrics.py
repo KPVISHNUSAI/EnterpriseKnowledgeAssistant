@@ -153,3 +153,32 @@ def test_dump_keeps_each_case_on_one_line_and_round_trips() -> None:
     }
     rows = [line.strip().rstrip(",") for line in text.splitlines() if '"id": ' in line]
     assert [json.loads(row) for row in rows] == cases
+
+
+def test_report_header_names_the_files_behind_values_that_differ() -> None:
+    assert report._across({"a.json": "x", "b.json": "x"}) == "x"
+    env = {
+        "cpu": "Apple M4",
+        "cpu_count": 10,
+        "memory_gb": 16.0,
+        "platform": "macOS",
+        "python": "3.14.6",
+        "postgres": "17.11",
+        "pgvector": "0.8.7",
+        "device": "mps",
+        "model_revisions": {},
+        "packages": {},
+        "git_commit": "abf0980",
+        "git_dirty": False,
+    }
+    runs = {
+        "retrieval.json": {"environment": env},
+        "generation-extractive.json": {"environment": env},
+        "generation-llm.json": {"environment": {**env, "git_commit": "9a008ba"}},
+    }
+    lines = report._environment(runs)
+    assert "| Python | 3.14.6 |" in lines
+    assert (
+        "| Git | abf0980 (`retrieval.json`, `generation-extractive.json`); "
+        "9a008ba (`generation-llm.json`) |"
+    ) in lines
