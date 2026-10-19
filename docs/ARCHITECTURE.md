@@ -78,7 +78,8 @@ storage. The Next.js frontend talks only to the versioned REST API.
   of a failed sign-in (one per organization of an existing account) are written after the
   401 has been sent, so the response time does not tell whether an account exists.
 * Sign-up is by invitation only unless `ALLOW_PUBLIC_REGISTRATION=true` (off by default;
-  `scripts/create_organization.py` makes the first organization on the server). Public
+  `scripts/create_organization.py` creates the first organization on the server and prints
+  a one-time sign-up link for its admin, who chooses their own password). Public
   registration answers `409 email_taken` for an email that already has an account, so it
   reveals accounts, at `RATE_LIMIT_REGISTER_PER_HOUR` attempts per IP.
 * Pure-ASGI middleware (so SSE is never buffered): request IDs, access logs, metrics,

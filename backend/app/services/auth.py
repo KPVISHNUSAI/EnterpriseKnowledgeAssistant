@@ -156,30 +156,14 @@ def _me_for(
 
 def register(db: Session, body: RegisterRequest, *, meta: RequestMeta) -> tuple[MeResponse, str]:
     """Returns (me, raw session token). 409 if the email is taken."""
-    if body.invite_token is None and not get_settings().allow_public_registration:
-        raise ForbiddenError("Registration is by invitation only", code="registration_disabled")
-    user, org_id = _add_account(db, body, meta=meta)
-    session, token = create_session(db, user, organization_id=org_id, meta=meta)
-    db.commit()
-    return _me_for(db, user, org_id, session.id), token
-
-
-def create_organization(db: Session, body: RegisterRequest, *, meta: RequestMeta) -> uuid.UUID:
-    """A new organization and its first admin, made on the server
-    (scripts/create_organization.py), so ALLOW_PUBLIC_REGISTRATION does not apply."""
-    _, org_id = _add_account(db, body, meta=meta)
-    db.commit()
-    return org_id
-
-
-def _add_account(
-    db: Session, body: RegisterRequest, *, meta: RequestMeta
-) -> tuple[User, uuid.UUID]:
-    """The new user and the organization they joined (by invitation) or created. Not committed."""
-    if body.invite_token is None and not body.organization_name:
-        raise ValidationFailedError(
-            "organization_name is required", code="organization_name_required"
-        )
+    settings = get_settings()
+    if body.invite_token is None:
+        if not settings.allow_public_registration:
+            raise ForbiddenError("Registration is by invitation only", code="registration_disabled")
+        if not body.organization_name:
+            raise ValidationFailedError(
+                "organization_name is required", code="organization_name_required"
+            )
     _check_password(body.password, body.email)
 
     invitation = None
@@ -255,7 +239,9 @@ def _add_account(
         metadata={"invited": invitation is not None},
         meta=meta,
     )
-    return user, org_id
+    session, token = create_session(db, user, organization_id=org_id, meta=meta)
+    db.commit()
+    return _me_for(db, user, org_id, session.id), token
 
 
 def _record_login_failure(user_id: uuid.UUID, reason: str, meta: RequestMeta) -> None:

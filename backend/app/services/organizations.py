@@ -10,13 +10,14 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import ColumnElement, delete, func, or_, select, update
+from sqlalchemy import ColumnElement, delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
 from app.core.security import hash_token, new_token
 from app.db.base import utcnow
+from app.db.session import set_tenant
 from app.models import (
     DocumentPermission,
     Invitation,
@@ -311,7 +312,6 @@ def create_invitation(
     db: Session, principal: Principal, body: InvitationCreate, *, meta: RequestMeta
 ) -> InvitationCreated:
     access.require(principal.is_org_admin)
-    settings = get_settings()
     org_id = principal.organization_id
     member = db.scalar(
         select(OrganizationMembership.id)
@@ -320,6 +320,45 @@ def create_invitation(
     )
     if member is not None:
         raise ConflictError("This person is already a member", code="already_member")
+    return _invite(db, org_id, body, inviter=principal, meta=meta)
+
+
+def invite_first_admin(
+    db: Session, organization_name: str, email: str, *, meta: RequestMeta
+) -> InvitationCreated:
+    """Create an organization and invite its first admin, from the server
+    (scripts/create_organization.py): the link lets them choose their own password. For an
+    organization of that name that nobody has joined yet, a new link replaces the last."""
+    org = db.scalar(
+        select(Organization)
+        .where(Organization.name == organization_name)
+        .order_by(Organization.created_at)
+        .limit(1)
+        .with_for_update()
+    )
+    if org is None:
+        org = Organization(name=organization_name)
+        db.add(org)
+        db.flush()
+    elif db.scalar(select(exists().where(OrganizationMembership.organization_id == org.id))):
+        raise ConflictError(
+            "This organization already has members; its admins invite people from the admin page",
+            code="organization_has_members",
+        )
+    set_tenant(db, org.id)
+    body = InvitationCreate(email=email, role=OrgRole.ORG_ADMIN)
+    return _invite(db, org.id, body, inviter=None, meta=meta)
+
+
+def _invite(
+    db: Session,
+    org_id: uuid.UUID,
+    body: InvitationCreate,
+    *,
+    inviter: Principal | None,
+    meta: RequestMeta,
+) -> InvitationCreated:
+    settings = get_settings()
     # One live invitation per email: a new one supersedes links sent earlier.
     db.execute(
         update(Invitation)
@@ -333,7 +372,7 @@ def create_invitation(
         email=body.email,
         role=body.role,
         token_hash=hash_token(token),
-        invited_by=principal.user_id,
+        invited_by=inviter.user_id if inviter else None,
         expires_at=utcnow() + timedelta(hours=settings.invitation_ttl_hours),
     )
     db.add(invitation)
@@ -342,7 +381,7 @@ def create_invitation(
         db,
         AuditAction.ORG_INVITATION_CREATED,
         organization_id=org_id,
-        actor_user_id=principal.user_id,
+        actor_user_id=inviter.user_id if inviter else None,
         resource_type="invitation",
         resource_id=invitation.id,
         metadata={"email": body.email, "role": body.role.value},
@@ -350,7 +389,7 @@ def create_invitation(
     )
     db.commit()
     return InvitationCreated(
-        **_invitation_out(invitation, principal.email).model_dump(),
+        **_invitation_out(invitation, inviter.email if inviter else None).model_dump(),
         token=token,
         invite_url=f"{settings.public_base_url.rstrip('/')}/invite/{token}",
     )

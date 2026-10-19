@@ -366,7 +366,7 @@ The defaults of every other setting are in `backend/app/core/config.py` and `.en
 | `COOKIE_DOMAIN` | unset | Only if UI and API are on different subdomains |
 | `TRUST_PROXY_HEADERS` | `true` (api) | Behind the ALB only. The client IP (rate limits, audit log) is the last `X-Forwarded-For` entry, which the ALB appends |
 | `FORWARDED_ALLOW_IPS` | `VPC_CIDR` (api) | Read by uvicorn (`--proxy-headers`): trusts `X-Forwarded-Proto` from the ALB so redirects use https. Not an application setting |
-| `ALLOW_PUBLIC_REGISTRATION` | `false` (the default) | Sign-up by invitation only. Create the first organization and its admin with `scripts/create_organization.py` (section 15) |
+| `ALLOW_PUBLIC_REGISTRATION` | `false` (the default) | Sign-up by invitation only. Create the first organization and invite its admin with `scripts/create_organization.py` (section 15) |
 | `DATABASE_URL`, `MIGRATION_DATABASE_URL` | secrets | section 4. `DB_APP_ROLE` stays `eka_app` |
 | `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_STATEMENT_TIMEOUT_MS` | 10, 10, 30000 | Per process; see the connection budget |
 | `REDIS_URL` | secret | section 5. `CELERY_BROKER_URL` is unset and falls back to it |
@@ -619,17 +619,25 @@ removes them; align both with your deletion commitments.
 6. Log groups; render and register all five task definitions; run `eka-migrate` and check
    the exit code (section 4).
 7. ALB, listeners and target groups (section 10); ECS cluster and the four services (section 11).
-8. Create the first organization and its administrator. Sign-up is by invitation only, so
-   this runs once as a one-off task from the API task definition:
+8. Create the first organization and invite its administrator. Sign-up is by invitation
+   only, so this runs once as a one-off task from the API task definition:
 
    ```bash
-   aws ecs run-task --cluster eka --launch-type FARGATE --task-definition eka-api \
+   TASK_ARN=$(aws ecs run-task --cluster eka --launch-type FARGATE --task-definition eka-api \
      --network-configuration "awsvpcConfiguration={subnets=[<private-subnet-a>],securityGroups=[<api-sg>],assignPublicIp=DISABLED}" \
-     --overrides '{"containerOverrides":[{"name":"api","command":["python","scripts/create_organization.py","--organization","<name>","--email","<admin email>","--name","<admin name>"],"environment":[{"name":"ADMIN_PASSWORD","value":"<temporary password>"}]}]}'
+     --overrides '{"containerOverrides":[{"name":"api","command":["python","scripts/create_organization.py","--organization","<name>","--email","<admin email>"]}]}' \
+     --query 'tasks[0].taskArn' --output text)
+   aws ecs wait tasks-stopped --cluster eka --tasks "$TASK_ARN"
+   aws logs get-log-events --log-group-name /ecs/eka/api \
+     --log-stream-name "api/api/${TASK_ARN##*/}" --query 'events[].message' --output text
    ```
 
-   CloudTrail records the RunTask parameters, password included, so the administrator
-   changes it at first sign-in (Settings, Change password). Everyone else is invited.
+   The output ends with a one-time sign-up link (valid `INVITATION_TTL_HOURS`, built from
+   `PUBLIC_BASE_URL`). The administrator opens it and chooses their own password, so no
+   password appears in the task parameters, which CloudTrail records, or in the logs. Until
+   it is used, the link works like a password for anyone who can read that log stream, so
+   hand it over privately. Running the task again before anyone has joined replaces the
+   link. Everyone else is then invited from the admin page.
 9. Verify (below), then create the alarms and enable autoscaling.
 
 **Release checklist**

@@ -292,30 +292,30 @@ def test_public_registration_can_be_disabled(client, monkeypatch, tenant, db):
     assert response.status_code == 201, response.text
 
 
-def test_sign_up_is_closed_by_default_and_the_first_admin_is_made_on_the_server(
+def test_sign_up_is_closed_by_default_and_the_first_admin_is_invited_from_the_server(
     client, monkeypatch, capsys
 ):
     assert Settings.model_fields["allow_public_registration"].default is False
     monkeypatch.setattr(get_settings(), "allow_public_registration", False)
     assert _register(client).status_code == 403
+    with pytest.raises(SystemExit, match="invalid email"):
+        create_organization.main(["--organization", "Acme", "--email", "not-an-email"])
 
-    monkeypatch.setenv("ADMIN_PASSWORD", "Short-9")
-    with pytest.raises(SystemExit, match="characters long"):
-        create_organization.main(
-            ["--organization", "Acme", "--email", "a@acme.example", "--name", "A"]
-        )
-    monkeypatch.setenv("ADMIN_PASSWORD", STRONG_PASSWORD)
-    argv = ["--organization", "Acme", "--email", "Asha@Acme.example", "--name", "Asha Admin"]
+    argv = ["--organization", "Acme", "--email", "Asha@Acme.example"]
     assert create_organization.main(argv) == 0
-    assert STRONG_PASSWORD not in capsys.readouterr().out
-    with pytest.raises(SystemExit, match="already exists"):
-        create_organization.main(argv)
+    lost = capsys.readouterr().out.split()[-1].rsplit("/invite/", 1)[1]
+    assert create_organization.main(argv) == 0  # nobody has joined: a new link replaces it
+    token = capsys.readouterr().out.split()[-1].rsplit("/invite/", 1)[1]
+    assert client.get(f"/api/v1/auth/invitations/{lost}").status_code == 404
 
-    response = client.post(LOGIN, json={"email": "asha@acme.example", "password": STRONG_PASSWORD})
-    assert response.status_code == 200, response.text
+    response = _register(
+        client, email="asha@acme.example", organization_name=None, invite_token=token
+    )
+    assert response.status_code == 201, response.text
     me = response.json()
     assert (me["organization"]["name"], me["organization"]["role"]) == ("Acme", "org_admin")
-    assert [w["name"] for w in me["workspaces"]] == ["General"]
+    with pytest.raises(SystemExit, match="already has members"):
+        create_organization.main(argv)
 
 
 def test_an_account_deactivated_mid_request_cannot_accept_an_invitation(
