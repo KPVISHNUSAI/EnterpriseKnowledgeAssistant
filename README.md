@@ -469,7 +469,7 @@ Production issues (ALB timeouts, migrations, secrets) are covered in
 
 Tested, with results reported from actual runs:
 
-* **Backend.** 1092 tests: unit tests, and integration tests against PostgreSQL with pgvector
+* **Backend.** 1093 tests: unit tests, and integration tests against PostgreSQL with pgvector
   and Redis. They include the real embedding model and cross-encoder, and a live Ollama
   server for the OpenAI-compatible provider. CI runs everything except the real-model tests
   on every push.

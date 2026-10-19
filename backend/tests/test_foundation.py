@@ -294,10 +294,14 @@ def test_sse_bridge_cancels_producer_when_client_disconnects():
     cancelled = threading.Event()
 
     def produce(cancel: threading.Event) -> Iterator[bytes]:
-        yield b"event: token\ndata: {}\n\n"
-        while not cancel.wait(0.01):
-            pass
-        cancelled.set()
+        try:
+            yield b"event: token\ndata: {}\n\n"
+            while not cancel.wait(0.01):
+                pass
+        finally:
+            # If the client is gone before this thread resumes, the bridge never resumes
+            # it but closes it at the yield; real producers clean up in `finally` too.
+            cancelled.set()
 
     async def scenario() -> None:
         agen = stream_from_thread(produce, heartbeat_seconds=0.05)

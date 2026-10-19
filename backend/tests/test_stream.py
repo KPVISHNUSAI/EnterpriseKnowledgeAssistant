@@ -226,6 +226,21 @@ def test_abandoned_producer_still_persists_the_partial_answer(produce, db, tenan
     assert db.scalar(select(func.count()).select_from(Message)) == 2
 
 
+def test_producer_abandoned_right_after_meta_closes_the_message(produce, db, tenant):
+    """The client can leave before the bridge resumes the producer past its first event."""
+    llm = FakeLLM()
+    cancel = threading.Event()
+    generator = produce(llm)(cancel)
+    meta = decode(next(generator))
+    cancel.set()
+    generator.close()
+
+    assert llm.answer_requests == []
+    set_tenant(db, tenant.org.id)
+    stored = db.get(Message, uuid.UUID(meta[1]["assistant_message_id"]))
+    assert stored.status == MessageStatus.INCOMPLETE and stored.content == ""
+
+
 def test_cancellation_before_generation_makes_no_model_call(produce, db, tenant):
     llm = FakeLLM()
     cancel = threading.Event()

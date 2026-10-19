@@ -146,14 +146,15 @@ def start_chat_stream(
     options = RetrievalOptions.from_settings(settings)
 
     def produce(cancel: threading.Event) -> Iterator[bytes]:
-        yield encode_event("meta", meta)
         with session_scope(principal.organization_id) as session:
             state = _StreamState()
             try:
+                yield encode_event("meta", meta)
                 yield from _events(session, state, cancel)
             finally:
                 # Also runs when the bridge abandons this generator after the client
-                # disconnected: the placeholder must never stay in status "streaming".
+                # disconnected, at any yield including the first: the placeholder must
+                # never stay in status "streaming".
                 final = _persist(session, state, cancel)
             yield _terminal_event(state, final)
 
