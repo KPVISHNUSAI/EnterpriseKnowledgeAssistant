@@ -249,12 +249,15 @@ def _relay(
 def _finish(result: AnswerResult, outcome: _Outcome, passages: list[ContextPassage]) -> None:
     """Validate citations and settle the status; refusals, provider errors, truncation
     and cancellation override or annotate it."""
-    validated = validate(outcome.text.strip(), passages)
+    text, declared = outcome.text.strip(), outcome.declared
+    if declared is None:
+        declared, text = _late_status(text)
+    validated = validate(text, passages)
     result.answer = validated.text
     result.citations = validated.citations
     result.invalid_citations = validated.invalid_citations
     result.unverified_quotes = validated.unverified_quotes
-    result.status = final_status(outcome.declared, validated.citations)
+    result.status = final_status(declared, validated.citations)
     if outcome.model is not None:
         result.model = outcome.model
     if outcome.usage is not None:
@@ -325,6 +328,19 @@ class _StatusLine:
             text = text.lstrip()
             self._skip_blank = not text
         return text
+
+
+def _late_status(text: str) -> tuple[str | None, str]:
+    """A status line written after the answer instead of first (small models do this):
+    its status, and the text without that line. Streamed deltas already showed the line;
+    the final message, which replaces them, does not."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        match = _STATUS_LINE.match(line)
+        if match is not None:
+            rest = "\n".join(lines[:index] + lines[index + 1 :]).strip()
+            return match.group(1).upper(), rest
+    return None, text
 
 
 def _could_be_status(head: str) -> bool:

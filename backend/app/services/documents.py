@@ -561,7 +561,7 @@ def delete_document(
     db.commit()
     _delete_object(storage, doc.storage_key)
     try:
-        cache.invalidate(content_hashes)
+        cache.invalidate(doc.organization_id, content_hashes)
     except Exception:  # the delete is committed; cached vectors expire on their own
         logger.warning(
             "documents.embedding_cache_invalidation_failed",

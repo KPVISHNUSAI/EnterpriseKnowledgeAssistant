@@ -259,8 +259,12 @@ set. Prometheus: `eka_llm_tokens_total{provider,model,direction}`,
   resolve references into earlier answers.
 * Cancellation is noticed between deltas only; while a model is thinking (no text), the
   disconnect is acted on when the first delta arrives.
-* `POST /chat` (non-streaming) holds a worker thread for the whole generation; long answers
-  belong on `/chat/stream`.
+* `POST /chat` (non-streaming) returns nothing until the whole answer is generated; long
+  answers belong on `/chat/stream`. It runs the pipeline on a thread of its own, like the
+  stream producers, not on the worker-thread pool (40 threads) that every sync endpoint
+  shares, so slow generations cannot stall sign-in, health checks or other tenants'
+  requests. Neither path caps concurrent generations per process beyond the per-user
+  chat rate limit.
 * Nothing in this layer logs prompts, passages, answers or keys; log records carry counts,
   statuses, kinds and timings only.
 

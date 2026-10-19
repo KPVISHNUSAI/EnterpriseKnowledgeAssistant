@@ -101,6 +101,9 @@ services:
     <<: *backend
     command: ["celery", "-A", "app.worker.celery_app", "worker", "-Q", "ingestion,maintenance", "--concurrency", "1", "-l", "INFO"]
     restart: unless-stopped
+    # Same hard limit as the ECS task: a hostile document can exhaust only this container,
+    # not the database sharing the Docker VM.
+    mem_limit: 4g
     volumes:
       - storage:/var/lib/eka/storage
       - hf-cache:/var/lib/eka/huggingface

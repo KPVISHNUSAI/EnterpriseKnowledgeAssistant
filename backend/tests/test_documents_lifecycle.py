@@ -251,8 +251,10 @@ def _citation(doc_id, source_id: str) -> dict:
 def test_delete_removes_everything_derived_from_the_document(
     login_as, factory, tenant, db, monkeypatch
 ):
-    invalidated: list[list[str]] = []
-    monkeypatch.setattr(cache, "invalidate", lambda hashes: invalidated.append(sorted(hashes)))
+    invalidated: list[tuple[uuid.UUID, list[str]]] = []
+    monkeypatch.setattr(
+        cache, "invalidate", lambda org_id, hashes: invalidated.append((org_id, sorted(hashes)))
+    )
     client = login_as(tenant.manager, tenant.org)
     secret = b"Berlin office closes in March."
     doc_id = uuid.UUID(uploaded(client, tenant.workspace.id, data=secret)["document"]["id"])
@@ -308,7 +310,7 @@ def test_delete_removes_everything_derived_from_the_document(
         assert db.scalar(count) == 0, model.__name__
     assert db.scalar(select(func.count()).select_from(DocumentChunk)) == 1  # the other doc's
     assert not get_storage().exists(key)
-    assert invalidated == [sorted(chunk.content_hash for chunk in chunks)]
+    assert invalidated == [(tenant.org.id, sorted(chunk.content_hash for chunk in chunks))]
 
     scrubbed = db.get(Message, message.id)
     deleted_source, kept_source = scrubbed.sources

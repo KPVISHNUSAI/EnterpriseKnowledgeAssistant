@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 import uuid
@@ -12,6 +13,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
+from app import main
 from app.core.errors import RateLimitedError
 from app.core.rate_limit import hit
 from app.core.redis import get_redis
@@ -80,6 +82,31 @@ def test_metrics_endpoint(anon_client):
     response = anon_client.get("/metrics")
     assert response.status_code == 200
     assert "eka_http_requests_total" in response.text
+
+
+def test_model_warm_up_loads_the_models_and_only_logs_a_failure(monkeypatch, caplog):
+    calls: list[str] = []
+
+    class Embedder:
+        def embed_query(self, text: str) -> None:
+            calls.append("embed")
+
+    class Reranker:
+        def score(self, query: str, passages: list[str]) -> None:
+            calls.append("rerank")
+
+    monkeypatch.setattr(main, "get_embedder", Embedder)
+    monkeypatch.setattr(main, "get_reranker", Reranker)
+    main._warm_up_models()
+    assert calls == ["embed", "rerank"]
+
+    def offline() -> None:
+        raise OSError("model download failed")
+
+    monkeypatch.setattr(main, "get_embedder", offline)
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        main._warm_up_models()  # the API keeps starting
+    assert "models.warm_up_failed" in caplog.messages
 
 
 @pytest.mark.parametrize(

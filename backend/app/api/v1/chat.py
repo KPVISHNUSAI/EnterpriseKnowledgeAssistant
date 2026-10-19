@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import math
 import uuid
+from functools import partial
 
+from anyio import CapacityLimiter, to_thread
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -24,6 +27,12 @@ router = APIRouter(tags=["chat"])
 
 _chat_limit = rate_limit_user("chat", "rate_limit_chat_per_minute")
 
+# Sync routes run on one worker-thread pool (40 threads) shared by every endpoint, and a
+# generation can last LLM_TIMEOUT_SECONDS, so POST /chat runs on threads of its own, like
+# the /chat/stream producers. ponytail: unbounded like those producers (the per-user rate
+# limit bounds it); give this limiter a size if generations per process must be capped.
+_generation_threads = CapacityLimiter(math.inf)
+
 
 @router.post(
     "/chat",
@@ -31,7 +40,7 @@ _chat_limit = rate_limit_user("chat", "rate_limit_chat_per_minute")
     responses=errors(401, 404, 422, 429, 503),
     dependencies=[_chat_limit],
 )
-def chat(
+async def chat(
     body: ChatRequest,
     principal: Principal = Depends(get_principal),
     db: Session = Depends(get_db),
@@ -46,7 +55,10 @@ def chat(
     `answer_status` is `insufficient_evidence` when the documents do not support an
     answer.
     """
-    return chat_service.chat(db, principal, body, embedder=embedder, reranker=reranker, llm=llm)
+    answer = partial(
+        chat_service.chat, db, principal, body, embedder=embedder, reranker=reranker, llm=llm
+    )
+    return await to_thread.run_sync(answer, limiter=_generation_threads)
 
 
 @router.post(

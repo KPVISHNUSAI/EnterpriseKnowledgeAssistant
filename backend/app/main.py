@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import hmac
 import logging
+import threading
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +27,7 @@ from app.core.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.providers.registry import get_embedder, get_reranker
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,28 @@ every POST/PUT/PATCH/DELETE. Errors always use the envelope
 """
 
 
+def _warm_up_models() -> None:
+    """Load the embedding and reranker models before the first search needs them: a cold
+    load takes seconds (the very first start also downloads them)."""
+    try:
+        get_embedder().embed_query("warm-up")
+        reranker = get_reranker()
+        if reranker is not None:
+            reranker.score("warm-up", ["warm-up"])
+    except Exception:  # the first search loads them again and reports the error
+        logger.warning("models.warm_up_failed", exc_info=True)
+    else:
+        logger.info("models.warmed_up")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # In a thread, so sign-in and health checks are served while the models load; a
+    # search that arrives meanwhile waits on the provider's load lock instead of loading twice.
+    threading.Thread(target=_warm_up_models, name="model-warm-up", daemon=True).start()
+    yield
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
@@ -49,6 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/v1/openapi.json",
+        lifespan=_lifespan,
     )
     install_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")

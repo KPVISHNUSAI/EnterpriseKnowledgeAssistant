@@ -90,6 +90,88 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg17
+        env:
+          POSTGRES_PASSWORD: ci-only-postgres-password # throwaway service container
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      UV_PYTHON_DOWNLOADS: manual # see the backend job
+      NEXT_TELEMETRY_DISABLED: "1"
+      # e2e/stack/launcher.ts builds and starts the frontend, the API and the ingestion worker
+      # from source. It creates the eka_owner/eka_app roles and the eka_e2e database through
+      # the admin URL, migrates it and uses Redis DB 12.
+      EKA_POSTGRES_PORT: "5432"
+      EKA_REDIS_PORT: "6379"
+      E2E_ADMIN_DATABASE_URL: postgresql://postgres:ci-only-postgres-password@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.20" # same as backend/Dockerfile
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install Python (version from backend/.python-version)
+        working-directory: backend
+        run: uv python install
+      # Dev group only: the stack runs with the hashing embedder, so no torch.
+      - name: Install the backend dependencies
+        working-directory: backend
+        run: uv sync --frozen
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24 # LTS; the project needs Node 22 or newer
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+      - name: Install the frontend dependencies (the launcher builds it)
+        working-directory: frontend
+        run: npm ci
+      - name: Install the test dependencies
+        working-directory: e2e
+        run: npm ci
+      - name: Type-check the tests
+        working-directory: e2e
+        run: npm run typecheck
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run the end-to-end tests
+        working-directory: e2e
+        run: npm test
+      - name: Upload the Playwright report and the stack logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+            e2e/.stack/logs
+          include-hidden-files: true # .stack is a dot directory
+          retention-days: 14
+
   docker:
     name: Docker images
     runs-on: ubuntu-latest

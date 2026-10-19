@@ -9,8 +9,11 @@ import logging
 import re
 import unicodedata
 from collections import defaultdict
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
 
+import pypdf.filters
 from pypdf import PdfReader
 
 from app.core.config import get_settings
@@ -35,7 +38,68 @@ def _encrypted() -> IngestionError:
     )
 
 
+@dataclass
+class _DecodeBudget:
+    limit_mb: int
+    remaining: int  # bytes
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining < 0
+
+    def error(self) -> IngestionError:
+        return IngestionError(
+            "file_too_large",
+            f"The PDF expands to more than {self.limit_mb} MB of content. Split it into "
+            "smaller files and upload them again.",
+        )
+
+
+_budget: ContextVar[_DecodeBudget | None] = ContextVar("pdf_decode_budget", default=None)
+_decode_stream_data = pypdf.filters.decode_stream_data
+
+
+def _budgeted_decode(stream: Any) -> bytes:
+    """pypdf inflates every stream (page contents, forms, fonts, object streams) through
+    `decode_stream_data` and keeps the result for the reader's lifetime. Its limits are
+    per stream, so a small file of many highly compressed streams could otherwise fill the
+    worker's memory (zlib reaches ~1000:1). Charging each decode to the document's budget
+    bounds what one PDF can inflate, as MAX_DOCX_UNCOMPRESSED_MB does for Word files."""
+    budget = _budget.get()
+    if budget is None:
+        return _decode_stream_data(stream)
+    if budget.exhausted:
+        raise budget.error()
+    data = _decode_stream_data(stream)
+    budget.remaining -= len(data)
+    if budget.exhausted:
+        raise budget.error()
+    return data
+
+
+# EncodedStreamObject.get_data imports this name from pypdf.filters on every call.
+# tests/test_parsers.py::test_pdf_decompression_bomb_is_rejected fails if that changes.
+pypdf.filters.decode_stream_data = _budgeted_decode
+
+
 def parse_pdf(data: bytes) -> ParsedDocument:
+    limit_mb = get_settings().max_pdf_uncompressed_mb
+    budget = _DecodeBudget(limit_mb, limit_mb * 1024 * 1024)
+    token = _budget.set(budget)
+    try:
+        parsed = _parse_pdf(data, budget)
+    except IngestionError:
+        if budget.exhausted:  # an over-budget decode can surface as any other failure
+            raise budget.error() from None
+        raise
+    finally:
+        _budget.reset(token)
+    if budget.exhausted:  # pypdf skipped the part it could not decode (e.g. a form)
+        raise budget.error()
+    return parsed
+
+
+def _parse_pdf(data: bytes, budget: _DecodeBudget) -> ParsedDocument:
     try:
         reader = PdfReader(io.BytesIO(data))
         encrypted = reader.is_encrypted
@@ -64,6 +128,8 @@ def parse_pdf(data: bytes) -> ParsedDocument:
         try:
             text = page.extract_text() or ""
         except Exception:  # one damaged page should not lose the rest of the document
+            if budget.exhausted:
+                raise budget.error() from None
             failed += 1
             text = ""
         pages.append(text.splitlines())

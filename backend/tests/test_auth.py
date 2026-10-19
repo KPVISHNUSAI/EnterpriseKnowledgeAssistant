@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from argon2 import PasswordHasher
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core import rate_limit
@@ -18,6 +19,7 @@ from app.core.security import hash_token, password_needs_rehash
 from app.db.base import utcnow
 from app.db.session import set_tenant
 from app.models import AuditEvent, Invitation, OrgRole, User, UserSession, WorkspaceRole
+from app.services import auth as auth_service
 
 PASSWORD = "Correct-Horse-Battery-9"  # the factory's default password
 NEW_PASSWORD = "Another-Long-Passphrase-7"
@@ -145,6 +147,37 @@ def test_failed_login_is_audited_in_every_organization_of_the_account(
     assert response.status_code == 401
     for org in (tenant.org, other_tenant.org):
         assert len(_events(db, org.id, "auth.login_failed")) == 1
+
+
+def test_failed_login_is_audited_only_after_the_response(app, tenant, monkeypatch):
+    """SEC-02: the audit writes for an existing account happen after the 401 has been
+    sent, so failures for real accounts are not slower than for unknown emails."""
+    events: list[str] = []
+    record = auth_service._record_login_failure
+
+    def audited(*args):
+        events.append("audit")
+        record(*args)
+
+    monkeypatch.setattr(auth_service, "_record_login_failure", audited)
+
+    async def spy(scope, receive, send):
+        async def spied_send(message):
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                events.append("response")
+            await send(message)
+
+        await app(scope, receive, spied_send)
+
+    with TestClient(spy) as client:  # returns once the app is done, background tasks too
+        for email, expected in (
+            (tenant.viewer.email, ["response", "audit"]),
+            ("nobody@acme.example.com", ["response"]),
+        ):
+            events.clear()
+            response = client.post(LOGIN, json={"email": email, "password": WRONG_PASSWORD})
+            assert response.status_code == 401
+            assert events == expected
 
 
 def test_inactive_user_fails_like_a_wrong_password(client, factory, tenant, db):

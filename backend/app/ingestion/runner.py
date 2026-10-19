@@ -200,7 +200,7 @@ def _run(
     hashes = [hashlib.sha256(text.encode()).hexdigest() for text in texts]
     with _timed(timings, "embed"):
         vectors, cache_hits = embedding_cache.embed_with_cache(
-            embedder, texts, hashes, batch_size=settings.embedding_batch_size
+            claim.organization_id, embedder, texts, hashes, batch_size=settings.embedding_batch_size
         )
     if any(len(vector) != settings.embedding_dimensions for vector in vectors):
         raise EmbeddingError(
@@ -247,7 +247,7 @@ def _index(
         ).one_or_none()
         if version is None or job is None:
             # Deleted while we worked: drop what this attempt just cached for it.
-            embedding_cache.invalidate(hashes)
+            embedding_cache.invalidate(claim.organization_id, hashes)
             return JobStatus.CANCELLED
         if job.status != JobStatus.RUNNING or job.attempts != claim.attempts:
             # Cancelled (a newer upload) or re-claimed by another worker after our lease ran out.
@@ -307,7 +307,8 @@ def _index(
         metrics["timings_ms"]["total"] = round((time.monotonic() - started) * 1000, 1)
         _finish(db, claim, JobStatus.SUCCEEDED, metrics=metrics)
         db.commit()
-    embedding_cache.invalidate(old_hashes - set(hashes))  # vectors of the replaced text
+    # Vectors of the replaced text.
+    embedding_cache.invalidate(claim.organization_id, old_hashes - set(hashes))
     logger.info(
         "ingestion.succeeded",
         extra={

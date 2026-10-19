@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 50
     max_request_body_kb: int = 1024
     max_pdf_pages: int = 2000
+    max_pdf_uncompressed_mb: int = 200  # inflated stream data one PDF may decode
     max_docx_uncompressed_mb: int = 200
 
     # --- Authentication / sessions -------------------------------------------------------

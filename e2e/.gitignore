@@ -1,0 +1,7 @@
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+# Logs and the copied frontend of a run
+.stack/
+__pycache__/

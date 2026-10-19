@@ -22,13 +22,13 @@ reaper re-sends messages that were lost.
 | `eka.ingestion.process(job_id: str, organization_id: str)` | Celery task around `process_job`, queue `ingestion`. Enqueue with `app.worker.queue.enqueue_ingestion` after the job row is committed. |
 | `eka.maintenance.requeue_stale_jobs()` | The reaper, run by beat every minute (queue `maintenance`). |
 | `eka.maintenance.apply_retention()` | The retention policy, run by beat every 6 hours (queue `maintenance`). |
-| `cache.invalidate(content_hashes)` | Drops cached vectors of chunks (the documents service calls it after deleting a document). |
+| `cache.invalidate(organization_id, content_hashes)` | Drops the organization's cached vectors of chunks (the documents service calls it after deleting a document). |
 
 ## Formats
 
 | Format | What is extracted | Pages | Permanent errors |
 |---|---|---|---|
-| PDF (pypdf) | Text per page. Bookmarks (the outline) give section titles: a section starts at its heading line when that line is found on the page, else at the top of the page; pages without a bookmark continue the current section. Running headers/footers are removed and wrapped lines rejoined (see Cleaning). | 1-based | `encrypted_pdf` (a user password is needed; owner-password-only files open, AES-encrypted ones only with the `cryptography` package installed), `too_many_pages` (`MAX_PDF_PAGES`), `no_extractable_text` (scanned images: OCR is out of scope), `corrupt_file` |
+| PDF (pypdf) | Text per page. Bookmarks (the outline) give section titles: a section starts at its heading line when that line is found on the page, else at the top of the page; pages without a bookmark continue the current section. Running headers/footers are removed and wrapped lines rejoined (see Cleaning). | 1-based | `encrypted_pdf` (a user password is needed; owner-password-only files open, AES-encrypted ones only with the `cryptography` package installed), `too_many_pages` (`MAX_PDF_PAGES`), `file_too_large` (its streams inflate to more than `MAX_PDF_UNCOMPRESSED_MB`, default 200: a decompression-bomb guard, see below), `no_extractable_text` (scanned images: OCR is out of scope), `corrupt_file` |
 | DOCX (python-docx) | Body order. `Title` and `Heading N` styles build the heading path; tables become Markdown pipe tables (`\|` escaped, nested tables flattened into their cell); list paragraphs (Word numbering level, or the digit in `List Bullet 2`) become `- ` items indented two spaces per level; code-styled or all-monospace paragraphs become fenced code blocks. | none | `file_too_large` (unpacks to more than `MAX_DOCX_UNCOMPRESSED_MB`, checked before parsing), `corrupt_file` |
 | Markdown | YAML/TOML front matter skipped; ATX and Setext headings; ```` ``` ```` and `~~~` fences kept verbatim (an unclosed fence runs to the end); indented code after a blank line; pipe tables; lists with their continuation lines; hard line breaks. Links and emphasis are stripped from heading titles only. | none | `unreadable_text` |
 | Plain text | Paragraphs separated by blank lines; a paragraph indented throughout is kept as preformatted text. UTF-8 (with or without BOM), UTF-16 with BOM, else Windows-1252. | none | `unreadable_text` |
@@ -36,6 +36,16 @@ reaper re-sends messages that were lost.
 Anything else fails with `unsupported_file_type`; a document without indexable text
 fails with `empty_document`. The MIME type stored at upload decides the format, the file
 extension is the fallback.
+
+**Decompression bombs.** A DOCX is bounded at upload (the declared sizes of its parts). A
+PDF is bounded while it is parsed: pypdf inflates every stream through one function and
+keeps the result while the document is open, and its own limits (75 MB per stream, two
+million parser tokens per content stream, 5000 form XObjects per page) are per stream or
+per page, so a few kilobytes of deflated data per page could add up to gigabytes in the
+worker. `parsers/pdf.py` charges every inflated byte (page contents, forms, fonts, object
+streams) to a per-document budget of `MAX_PDF_UNCOMPRESSED_MB` and fails the job with
+`file_too_large` once it is spent. Parsing time is bounded by the Celery time limit (see
+Running the worker), not by this budget.
 
 ## Cleaning
 
@@ -109,7 +119,8 @@ Both real providers prepend `EMBEDDING_QUERY_PREFIX` to queries and
 return L2-normalized vectors. Documents are embedded in batches of
 `EMBEDDING_BATCH_SIZE`.
 
-**Cache.** Redis key `emb:v1:{model}:{sha256(EMBEDDING_DOCUMENT_PREFIX)[:12]}:{content_hash}`,
+**Cache.** Redis key
+`emb:v2:{organization_id}:{model}:{sha256(EMBEDDING_DOCUMENT_PREFIX)[:12]}:{content_hash}`,
 value the vector as little-endian float32 (what pgvector stores), TTL
 `EMBEDDING_CACHE_TTL_SECONDS` (default 7 days; 0 disables the cache). Lookups use MGET,
 writes a pipeline of SETs, each embedded batch is cached immediately (a retry after a
@@ -119,6 +130,17 @@ fails ingestion: lookups count as misses (`result="error"` in the metric) and wr
 skipped. Entries are removed when a document is deleted (documents service), when a
 re-index replaces chunks (hashes that disappeared), and when a document is deleted while
 its job runs.
+
+Entries are private to one organization, so identical text uploaded by two tenants is
+embedded twice. A shared namespace would let a tenant learn from ingestion speed (job
+`started_at`/`completed_at` are visible) that another tenant indexed byte-identical text,
+and one tenant's deletion would drop another tenant's entries. Within one organization
+entries are shared across workspaces: an uploader who already has the exact text could
+still confirm from ingestion speed that it is indexed in a workspace they cannot read, as
+`409 duplicate_document` confirms an identical file within a workspace. Add the workspace
+to the key if that matters (identical text in two workspaces is then embedded twice).
+Keys of the previous format (`emb:v1:{model}:...`, no organization) are no longer read
+and expire with their TTL; `redis-cli --scan --pattern 'emb:v1:*'` lists any that remain.
 
 ## Indexing
 

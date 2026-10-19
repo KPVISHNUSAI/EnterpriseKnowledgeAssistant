@@ -93,7 +93,7 @@ export default function DashboardPage() {
               <Skeleton key={i} className="h-24" />
             ))}
           </div>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Skeleton className="h-64" />
             <Skeleton className="h-64" />
           </div>
@@ -138,7 +138,7 @@ function DashboardContent({
         <Stat label="Workspaces" value={data.workspaces_count} icon={<Layers />} href="/workspaces" />
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader
             title="Recent documents"

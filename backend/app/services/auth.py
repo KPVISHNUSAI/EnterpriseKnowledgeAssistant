@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.core.config import get_settings
 from app.core.errors import (
@@ -28,7 +29,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.base import utcnow
-from app.db.session import set_tenant
+from app.db.session import session_scope, set_tenant
 from app.models import (
     Invitation,
     Organization,
@@ -242,28 +243,36 @@ def register(db: Session, body: RegisterRequest, *, meta: RequestMeta) -> tuple[
     return _me_for(db, user, org_id, session.id), token
 
 
-def _record_login_failure(db: Session, user: User, reason: str, meta: RequestMeta) -> None:
+def _record_login_failure(user_id: uuid.UUID, reason: str, meta: RequestMeta) -> None:
     """Audit the failure in each organization of the account. Never tenant-less rows:
-    retention runs per tenant under row-level security and could not purge them."""
-    org_ids = db.scalars(
-        select(OrganizationMembership.organization_id).where(
-            OrganizationMembership.user_id == user.id
-        )
-    ).all()
-    for org_id in org_ids:
-        set_tenant(db, org_id)  # each row must be written under its own tenant
-        audit.record(
-            db,
-            AuditAction.AUTH_LOGIN_FAILED,
-            organization_id=org_id,
-            actor_user_id=user.id,
-            resource_type="user",
-            resource_id=user.id,
-            metadata={"reason": reason},
-            meta=meta,
-        )
-        db.flush()
-    db.commit()
+    retention runs per tenant under row-level security and could not purge them.
+
+    Runs as a background task once the 401 has been sent: these writes (one per
+    organization) only happen for existing accounts, so doing them before responding
+    would make their failures measurably slower than unknown emails (enumeration)."""
+    try:
+        with session_scope() as db:
+            org_ids = db.scalars(
+                select(OrganizationMembership.organization_id).where(
+                    OrganizationMembership.user_id == user_id
+                )
+            ).all()
+            for org_id in org_ids:
+                set_tenant(db, org_id)  # each row must be written under its own tenant
+                audit.record(
+                    db,
+                    AuditAction.AUTH_LOGIN_FAILED,
+                    organization_id=org_id,
+                    actor_user_id=user_id,
+                    resource_type="user",
+                    resource_id=user_id,
+                    metadata={"reason": reason},
+                    meta=meta,
+                )
+                db.flush()
+            db.commit()
+    except SQLAlchemyError as exc:  # the response is already sent; keep the failure visible
+        logger.warning("auth.login_failure_audit_failed", extra={"error_type": type(exc).__name__})
 
 
 def login(db: Session, body: LoginRequest, *, meta: RequestMeta) -> tuple[MeResponse, str]:
@@ -276,9 +285,10 @@ def login(db: Session, body: LoginRequest, *, meta: RequestMeta) -> tuple[MeResp
             "unknown_email" if user is None else "invalid_password" if not valid else "inactive"
         )
         logger.info("auth.login_failed", extra={"reason": reason})
+        error = _invalid_credentials()
         if user is not None:
-            _record_login_failure(db, user, reason, meta)
-        raise _invalid_credentials()
+            error.background = BackgroundTask(_record_login_failure, user.id, reason, meta)
+        raise error
 
     org_id = db.scalar(
         select(OrganizationMembership.organization_id)

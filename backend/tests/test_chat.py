@@ -3,11 +3,15 @@ request validation and isolation between users and tenants."""
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections import Counter
+from collections.abc import Iterator
 from decimal import Decimal
+from typing import Any
 
 import pytest
+from anyio import to_thread
 from sqlalchemy import select
 from test_answer_fakes import LEAVE, FakeLLM, index_handbook
 
@@ -281,3 +285,55 @@ def test_default_configuration_answers_extractively(login_as, tenant, handbook, 
 
 def test_chat_requires_a_session(client):
     assert client.post(CHAT, json={"message": QUESTION}).status_code == 401
+
+
+class BlockingLLM(FakeLLM):
+    """Generates only once the test sets `release`, like a slow model."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.generating, self.release = threading.Event(), threading.Event()
+
+    def stream(self, request: Any) -> Iterator[Any]:
+        self.generating.set()
+        self.release.wait(timeout=60)
+        yield from super().stream(request)
+
+
+def test_generation_does_not_occupy_the_shared_worker_threads(app, login_as, tenant, handbook):
+    """SEC-03: sync endpoints (auth, health, documents, ...) share one worker-thread pool.
+    A non-streaming chat must not keep one of those threads while the model generates,
+    or a few slow chats stall the whole API. Here the pool has a single thread."""
+    llm = BlockingLLM()
+    app.dependency_overrides[get_llm] = lambda: llm
+    responses: dict[str, Any] = {}
+
+    async def one_shared_thread() -> None:
+        to_thread.current_default_thread_limiter().total_tokens = 1
+
+    with login_as(tenant.viewer, tenant.org) as client:  # one event loop for both requests
+        client.portal.call(one_shared_thread)
+
+        def ask() -> None:
+            responses["chat"] = client.post(CHAT, json={"message": QUESTION})
+
+        def me() -> None:
+            responses["me"] = client.get("/api/v1/auth/me")
+
+        asking = threading.Thread(target=ask)
+        asking.start()
+        try:
+            assert llm.generating.wait(timeout=30)
+            other = threading.Thread(target=me)
+            other.start()
+            other.join(timeout=15)
+            assert "me" in responses, "a sync endpoint waited for the generation to finish"
+            assert responses["me"].status_code == 200
+            assert "chat" not in responses  # still generating
+        finally:
+            llm.release.set()
+            asking.join(timeout=60)
+            if "me" not in responses:
+                other.join(timeout=60)
+    assert responses["chat"].status_code == 200, responses["chat"].text
+    assert responses["chat"].json()["assistant_message"]["answer_status"] == "answered"

@@ -1,0 +1,11 @@
+SYNTHETIC DOCUMENT - Northwind Aerial Robotics (fictional): Code of Business Conduct. Written for evaluation and demos; it describes no real company.
+
+Code of Business Conduct
+
+Gifts and hospitality: employees may accept gifts worth up to USD 75 per giver per calendar year. Gifts above this value must be declared in the gifts register within 5 business days and may have to be returned.
+
+Conflicts of interest: every employee confirms once a year that they have declared any outside business interest, including advisory roles at suppliers or competitors.
+
+Anti-bribery: facilitation payments are prohibited in every country, even where they are customary. Payments to officials must be approved by the Legal team in advance.
+
+Speaking up: concerns can be raised anonymously through the EthicsLine at ethics.northwind.example. Retaliation against anyone who raises a concern in good faith is a disciplinary offence.

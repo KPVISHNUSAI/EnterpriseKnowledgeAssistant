@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logging import request_id_var
@@ -30,11 +31,13 @@ class AppError(Exception):
         code: str | None = None,
         details: Any = None,
         headers: dict[str, str] | None = None,
+        background: BackgroundTask | None = None,
     ) -> None:
         self.message = message or self.message
         self.code = code or self.code
         self.details = details
         self.headers = headers
+        self.background = background  # runs after the error response has been sent
         super().__init__(self.message)
 
 
@@ -105,6 +108,7 @@ def install_exception_handlers(app: FastAPI) -> None:
             error_body(exc.code, exc.message, exc.details),
             status_code=exc.status_code,
             headers=exc.headers,
+            background=exc.background,
         )
 
     @app.exception_handler(RequestValidationError)

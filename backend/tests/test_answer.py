@@ -125,6 +125,17 @@ def test_answered_with_verified_citations(ask, tenant, handbook):
             "Staff get 25 days [S1].",
         ),
         ("STATUS: INSUFFICIENT", AnswerStatus.INSUFFICIENT_EVIDENCE, INSUFFICIENT_MESSAGE),
+        # Small models sometimes write the status line last instead of first.
+        (
+            "The sources do not say how many sick days exist.\n\nSTATUS: INSUFFICIENT",
+            AnswerStatus.INSUFFICIENT_EVIDENCE,
+            "The sources do not say how many sick days exist.",
+        ),
+        (
+            "Staff get 25 days [S1].\n**Status: partial**",
+            AnswerStatus.PARTIAL,
+            "Staff get 25 days [S1].",
+        ),
         ("", AnswerStatus.INSUFFICIENT_EVIDENCE, INSUFFICIENT_MESSAGE),
         ("Status update: 25 days [S1].", AnswerStatus.ANSWERED, "Status update: 25 days [S1]."),
     ],

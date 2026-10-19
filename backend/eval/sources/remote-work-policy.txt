@@ -1,0 +1,11 @@
+SYNTHETIC DOCUMENT - Northwind Aerial Robotics (fictional): Remote Work Policy. Written for evaluation and demos; it describes no real company.
+
+Remote Work Policy
+
+Employees may work remotely for up to 3 days per week when their manager agrees. Core collaboration hours are 10:00 to 15:00 in the employee's office time zone, and team meetings should be scheduled inside these hours.
+
+A one-time home office stipend of USD 400 is paid after the probation period. Employees of the UK company receive GBP 320 instead. The stipend covers a desk, a chair or a monitor; laptops and phones are provided by IT.
+
+Working from another country is allowed for up to 20 working days per calendar year with approval from the People team. Longer stays need a tax and immigration review before travel.
+
+Flight test engineers and laboratory technicians must work on site because their work needs the test range and lab equipment, so remote work does not apply to these roles.

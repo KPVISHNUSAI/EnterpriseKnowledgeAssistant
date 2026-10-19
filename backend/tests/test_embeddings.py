@@ -64,9 +64,12 @@ class CountingEmbedder(HashingEmbedder):
 def embedder() -> Iterator[CountingEmbedder]:
     instance = CountingEmbedder()
     yield instance
-    keys = list(get_redis().scan_iter(f"emb:v1:{instance.model_name}:*"))
+    keys = list(get_redis().scan_iter(f"emb:v2:*:{instance.model_name}:*"))
     if keys:
         get_redis().delete(*keys)
+
+
+ORG = uuid.uuid4()  # cache entries are per organization; keys include the model name too
 
 
 def closed_port() -> int:
@@ -80,28 +83,59 @@ def test_cache_misses_then_hits(embedder):
     hashes = [sha(text) for text in texts]
     hit, miss = cache_total("hit"), cache_total("miss")
 
-    vectors, hits = cache.embed_with_cache(embedder, texts, hashes, batch_size=2)
+    vectors, hits = cache.embed_with_cache(ORG, embedder, texts, hashes, batch_size=2)
     assert hits == 0
     assert embedder.calls == [["alpha", "beta"], ["gamma"]]
     assert vectors == HashingEmbedder(8).embed_documents(texts)
 
-    cached, hits = cache.embed_with_cache(embedder, texts, hashes, batch_size=2)
+    cached, hits = cache.embed_with_cache(ORG, embedder, texts, hashes, batch_size=2)
     assert hits == 3 and len(embedder.calls) == 2  # nothing embedded again
     for fresh, stored in zip(vectors, cached, strict=True):
         assert stored == pytest.approx(fresh, abs=1e-6)  # stored as float32
 
     _, hits = cache.embed_with_cache(
-        embedder, [*texts, "delta"], [*hashes, sha("delta")], batch_size=2
+        ORG, embedder, [*texts, "delta"], [*hashes, sha("delta")], batch_size=2
     )
     assert hits == 3 and embedder.calls[-1] == ["delta"]
     assert cache_total("hit") - hit == 6
     assert cache_total("miss") - miss == 4
 
 
+def test_entries_are_private_to_their_organization(embedder):
+    """SEC-01: another tenant embedding byte-identical text must not be served (or be
+    able to time) the first tenant's entries, nor drop them by invalidating."""
+    texts = ["Board minutes: the merger closes in March."]
+    hashes = [sha(text) for text in texts]
+    other = uuid.uuid4()
+    vectors, _ = cache.embed_with_cache(ORG, embedder, texts, hashes, batch_size=8)
+
+    _, hits = cache.embed_with_cache(other, embedder, texts, hashes, batch_size=8)
+    assert hits == 0 and len(embedder.calls) == 2  # embedded again for the other tenant
+    (own_key,) = cache._keys(ORG, embedder.model_name, hashes)
+    (other_key,) = cache._keys(other, embedder.model_name, hashes)
+    assert own_key != other_key and str(ORG) in own_key
+
+    cache.store(other, embedder.model_name, {hashes[0]: [0.5] * 8})  # the other tenant's write
+    (own,) = cache.lookup(ORG, embedder.model_name, hashes, 8)
+    assert own == pytest.approx(vectors[0], abs=1e-6)
+
+
+def test_invalidate_leaves_other_organizations_alone():
+    model = get_embedder().model_name
+    hashes = [uuid.uuid4().hex for _ in range(2)]
+    first, second = uuid.uuid4(), uuid.uuid4()
+    for org in (first, second):
+        cache.store(org, model, {content_hash: [0.25] * 4 for content_hash in hashes})
+    cache.invalidate(first, hashes)
+    assert cache.lookup(first, model, hashes, 4) == [None, None]
+    assert None not in cache.lookup(second, model, hashes, 4)
+    cache.invalidate(second, hashes)
+
+
 def test_cached_values_are_float32_with_the_configured_ttl(embedder):
     content_hash = sha("ttl")
-    cache.store(embedder.model_name, {content_hash: [0.5] * 8})
-    (key,) = cache._keys(embedder.model_name, [content_hash])
+    cache.store(ORG, embedder.model_name, {content_hash: [0.5] * 8})
+    (key,) = cache._keys(ORG, embedder.model_name, [content_hash])
     raw = get_redis().get(key)
     assert raw == struct.pack("<8f", *[0.5] * 8)
     ttl = get_redis().ttl(key)
@@ -110,25 +144,25 @@ def test_cached_values_are_float32_with_the_configured_ttl(embedder):
 
 def test_cached_value_of_the_wrong_size_is_a_miss(embedder):
     content_hash = sha("short")
-    (key,) = cache._keys(embedder.model_name, [content_hash])
+    (key,) = cache._keys(ORG, embedder.model_name, [content_hash])
     get_redis().set(key, b"\x00\x00\x80?", ex=60)  # one float for an 8-dimensional model
-    assert cache.lookup(embedder.model_name, [content_hash], 8) == [None]
+    assert cache.lookup(ORG, embedder.model_name, [content_hash], 8) == [None]
 
 
 def test_document_prefix_is_part_of_the_key(embedder, monkeypatch):
     content_hash = sha("prefixed")
-    cache.store(embedder.model_name, {content_hash: [1.0] * 8})
+    cache.store(ORG, embedder.model_name, {content_hash: [1.0] * 8})
     monkeypatch.setattr(get_settings(), "embedding_document_prefix", "passage: ")
-    assert cache.lookup(embedder.model_name, [content_hash], 8) == [None]
+    assert cache.lookup(ORG, embedder.model_name, [content_hash], 8) == [None]
 
 
 def test_ttl_zero_disables_the_cache(embedder, monkeypatch):
     monkeypatch.setattr(get_settings(), "embedding_cache_ttl_seconds", 0)
     for _ in range(2):
-        _, hits = cache.embed_with_cache(embedder, ["x"], [sha("x")], batch_size=8)
+        _, hits = cache.embed_with_cache(ORG, embedder, ["x"], [sha("x")], batch_size=8)
         assert hits == 0
     assert len(embedder.calls) == 2
-    assert not list(get_redis().scan_iter(f"emb:v1:{embedder.model_name}:*"))
+    assert not list(get_redis().scan_iter(f"emb:v2:*:{embedder.model_name}:*"))
 
 
 def test_unavailable_redis_fails_open(embedder, monkeypatch, caplog):
@@ -137,9 +171,9 @@ def test_unavailable_redis_fails_open(embedder, monkeypatch, caplog):
     errors = cache_total("error")
     with caplog.at_level(logging.WARNING, logger="app.providers.embeddings.cache"):
         vectors, hits = cache.embed_with_cache(
-            embedder, ["a", "b"], [sha("a"), sha("b")], batch_size=8
+            ORG, embedder, ["a", "b"], [sha("a"), sha("b")], batch_size=8
         )
-        cache.invalidate([sha("a")])
+        cache.invalidate(ORG, [sha("a")])
     assert hits == 0 and len(vectors) == 2
     assert cache_total("error") - errors == 2
     assert caplog.messages.count("embedding_cache.unavailable") == 3  # lookup, store, invalidate
@@ -148,18 +182,18 @@ def test_unavailable_redis_fails_open(embedder, monkeypatch, caplog):
 def test_invalidate_drops_the_configured_models_vectors():
     model = get_embedder().model_name
     hashes = [uuid.uuid4().hex for _ in range(3)]
-    cache.store(model, {content_hash: [0.25] * 4 for content_hash in hashes})
-    assert None not in cache.lookup(model, hashes, 4)
-    cache.invalidate([hashes[0], hashes[1], hashes[0]])
-    assert [vector is None for vector in cache.lookup(model, hashes, 4)] == [True, True, False]
-    cache.invalidate(hashes)
-    cache.invalidate([])  # no-op
+    cache.store(ORG, model, {content_hash: [0.25] * 4 for content_hash in hashes})
+    assert None not in cache.lookup(ORG, model, hashes, 4)
+    cache.invalidate(ORG, [hashes[0], hashes[1], hashes[0]])
+    assert [vector is None for vector in cache.lookup(ORG, model, hashes, 4)] == [True, True, False]
+    cache.invalidate(ORG, hashes)
+    cache.invalidate(ORG, [])  # no-op
 
 
 def test_provider_returning_too_few_vectors_is_rejected(embedder, monkeypatch):
     monkeypatch.setattr(embedder, "embed_documents", lambda texts: [[1.0] * 8])
     with pytest.raises(EmbeddingError) as info:
-        cache.embed_with_cache(embedder, ["a", "b"], [sha("a"), sha("b")], batch_size=8)
+        cache.embed_with_cache(ORG, embedder, ["a", "b"], [sha("a"), sha("b")], batch_size=8)
     assert not info.value.retryable
 
 

@@ -72,13 +72,14 @@ def store_document(
     *,
     filename: str = "guide.md",
     mime: str = "text/markdown",
+    title: str | None = None,
 ) -> Document:
-    """A queued document with its file in storage. The title is unique so the embedding
-    texts (and their cache keys) never collide with other tests or runs."""
+    """A queued document with its file in storage. The title is unique by default so the
+    embedding texts (and their cache keys) never collide with other tests or runs."""
     doc = factory.document(
         tenant.workspace,
         uploaded_by=tenant.editor,
-        title=f"Guide {uuid.uuid4().hex[:8]}",
+        title=title or f"Guide {uuid.uuid4().hex[:8]}",
         status=DocumentStatus.QUEUED,
         mime_type=mime,
         filename=filename,
@@ -190,14 +191,15 @@ def sent(monkeypatch) -> list[tuple[str, list[Any], dict[str, Any]]]:
 
 
 @pytest.fixture
-def invalidated(monkeypatch) -> list[set[str]]:
-    calls: list[set[str]] = []
+def invalidated(monkeypatch) -> list[tuple[uuid.UUID, set[str]]]:
+    """(organization id, hashes) of every cache invalidation."""
+    calls: list[tuple[uuid.UUID, set[str]]] = []
     real = cache.invalidate
 
-    def record(content_hashes: Any) -> None:
+    def record(organization_id: uuid.UUID, content_hashes: Any) -> None:
         hashes = set(content_hashes)
-        calls.append(hashes)
-        real(hashes)
+        calls.append((organization_id, hashes))
+        real(organization_id, hashes)
 
     monkeypatch.setattr(cache, "invalidate", record)
     return calls
@@ -324,6 +326,31 @@ def test_reindex_reuses_cached_embeddings(factory, tenant):
     assert [(c.content, c.content_hash) for c in chunk_rows(doc)] == before
 
 
+def test_identical_document_in_another_tenant_is_embedded_again(factory, tenant, other_tenant):
+    """SEC-01: cached embeddings belong to one organization. Otherwise a tenant could tell
+    from ingestion speed that another tenant indexed byte-identical text, and one tenant's
+    deletion would drop the other's entries."""
+    title = f"Guide {uuid.uuid4().hex[:8]}"  # same title + text: same embedding texts
+    ours, theirs = (store_document(factory, t, GUIDE, title=title) for t in (tenant, other_tenant))
+    assert process_job(add_job(ours).id, ours.organization_id) is JobStatus.SUCCEEDED
+
+    embedder = Embedder()
+    job = add_job(theirs)
+    assert process_job(job.id, theirs.organization_id, embedder=embedder) is JobStatus.SUCCEEDED
+    assert embedder.calls == 1  # nothing came from the first tenant's entries
+    assert (job_row(job).metrics["cache_hits"], job_row(job).metrics["cache_misses"]) == (0, 3)
+    assert [c.content_hash for c in chunk_rows(ours)] == [
+        c.content_hash for c in chunk_rows(theirs)
+    ]
+
+    # The first tenant deletes its copy: the other tenant's entries survive.
+    cache.invalidate(ours.organization_id, [c.content_hash for c in chunk_rows(ours)])
+    embedder = Embedder()
+    job = add_job(theirs)
+    assert process_job(job.id, theirs.organization_id, embedder=embedder) is JobStatus.SUCCEEDED
+    assert embedder.calls == 0 and job_row(job).metrics["cache_hits"] == 3
+
+
 def test_redelivered_message_is_a_no_op(factory, tenant):
     doc = store_document(factory, tenant, GUIDE)
     job = add_job(doc)
@@ -402,7 +429,7 @@ def test_document_deleted_while_processing(factory, tenant, invalidated):
     embedder = Embedder(during=lambda: execute(doc, remove))
     assert process_job(job.id, doc.organization_id, embedder=embedder) is JobStatus.CANCELLED
     # The vectors this attempt cached for the deleted document are dropped again.
-    assert len(invalidated) == 1 and len(invalidated[0]) == 3
+    assert [(org, len(hashes)) for org, hashes in invalidated] == [(doc.organization_id, 3)]
     assert process_job(job.id, doc.organization_id) is JobStatus.CANCELLED  # job is gone
 
 
@@ -627,7 +654,7 @@ def test_new_version_replaces_the_chunks(factory, tenant, invalidated):
     ]
     new = {c.content_hash for c in chunks}
     assert len(old & new) == 1  # the unchanged section keeps its hash (and cached vector)
-    assert invalidated == [old - new]
+    assert invalidated == [(doc.organization_id, old - new)]
     assert document_row(doc).chunk_count == 2
 
 

@@ -64,7 +64,13 @@ storage. The Next.js frontend talks only to the versioned REST API.
   are stored. Idle and absolute expiry; revocation on logout and password change.
 * CSRF: the readable `eka_csrf` cookie holds `HMAC(SECRET_KEY, session token)`; unsafe
   methods must echo it in `X-CSRF-Token`. Cross-site `Origin` headers are rejected.
-* Passwords: argon2id; unknown emails still pay for one hash verification.
+* Passwords: argon2id; unknown emails still pay for one hash verification. The audit rows
+  of a failed sign-in (one per organization of an existing account) are written after the
+  401 has been sent, so the response time does not tell whether an account exists.
+* Public registration (`ALLOW_PUBLIC_REGISTRATION=true`, the default) answers
+  `409 email_taken` for an email that already has an account, so it does reveal accounts,
+  at `RATE_LIMIT_REGISTER_PER_HOUR` attempts per IP. Deployments that must not reveal
+  accounts set it to `false` (sign-up by invitation only).
 * Pure-ASGI middleware (so SSE is never buffered): request IDs, access logs, metrics,
   body-size limits (before parsing), security headers.
 * Errors always use `{"error": {"code", "message", "details", "request_id"}}`.
@@ -82,9 +88,9 @@ storage. The Next.js frontend talks only to the versioned REST API.
    one active job per document.
 3. Parse (page numbers, headings, tables, code blocks preserved) → clean → chunk
    (token-based with overlap, never splitting code blocks mid-way where avoidable) →
-   embed in batches (Redis cache keyed by model + content hash) → replace the document's
-   chunks in one transaction, guarded by the document version so a stale job can never
-   overwrite a newer version.
+   embed in batches (Redis cache per organization, keyed by model + content hash) →
+   replace the document's chunks in one transaction, guarded by the document version so a
+   stale job can never overwrite a newer version.
 4. Failures are recorded on the job and document (`processing_error`); retryable errors
    back off and retry up to `INGESTION_MAX_ATTEMPTS`. A beat task re-queues expired
    leases and jobs whose broker message was lost.
@@ -129,3 +135,8 @@ Structured JSON logs (request/job IDs, no document text or secrets), Prometheus 
 at `/metrics` (HTTP, retrieval stages, generation latency, tokens, estimated cost,
 ingestion outcomes), `GET /api/v1/health` (liveness) and `GET /api/v1/ready`
 (database + migrations + vector dimension, Redis, storage).
+
+`/metrics` requires `Authorization: Bearer <METRICS_TOKEN>` only when `METRICS_TOKEN` is
+set: set it wherever the API port can be reached by anything but the metrics collector.
+The worker's metrics port (`WORKER_METRICS_PORT`) has no authentication at all and must
+only be reachable from the collector (see the security groups in DEPLOYMENT_AWS.md).

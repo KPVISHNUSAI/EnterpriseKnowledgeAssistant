@@ -7,6 +7,7 @@ import codecs
 import io
 import logging
 import zipfile
+import zlib
 
 import docx
 import pytest
@@ -238,6 +239,69 @@ def test_pdf_with_too_many_pages_is_rejected(monkeypatch):
         parse_pdf(report_pdf())
     assert info.value.code == "too_many_pages"
     assert "3 pages" in info.value.message
+
+
+def inflating_pdf(pages: list[str], mb: int, *, in_form: bool = False) -> bytes:
+    """One page per text; each page stream (or, with `in_form`, a form XObject the page
+    draws) is padded with `mb` MB of whitespace, which deflates about 1000:1."""
+    font = b"<< /Font << /F1 3 0 R >> >>"
+    form = b"/Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources " + font
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"",  # the page tree, once the page numbers are known
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+
+    def add(body: bytes) -> int:
+        objects.append(body)
+        return len(objects)  # object numbers start at 1
+
+    def stream(content: bytes, extra: bytes = b"") -> bytes:
+        data = zlib.compress(content)
+        head = b"<< %s /Filter /FlateDecode /Length %d >>" % (extra, len(data))
+        return head + b"\nstream\n" + data + b"\nendstream"
+
+    kids = []
+    for text in pages:
+        content = b"BT /F1 12 Tf 72 700 Td (%s) Tj ET\n" % text.encode() + b" " * (mb << 20)
+        resources = font
+        if in_form:
+            resources = b"<< /XObject << /X0 %d 0 R >> >>" % add(stream(content, form))
+            content = b"/X0 Do\n"
+        contents = add(stream(content))
+        page = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R" % contents
+        kids.append(b"%d 0 R" % add(page + b" /Resources " + resources + b" >>"))
+    objects[1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(kids), len(kids))
+    out, offsets = bytearray(b"%PDF-1.7\n"), []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    trailer = b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+    return bytes(out + trailer % (len(objects) + 1, xref))
+
+
+PAGE_TEXTS = ["Revenue grew in March.", "Hiring is on hold.", "The office moves in May."]
+
+
+@pytest.mark.parametrize("in_form", [False, True], ids=["page-streams", "form-xobjects"])
+def test_pdf_decompression_bomb_is_rejected(monkeypatch, in_form):
+    """SEC-04: pypdf keeps every inflated stream for the reader's lifetime and its own
+    limits are per stream, so a few kilobytes of deflated whitespace per page add up to
+    gigabytes in the worker. The document as a whole has a budget."""
+    data = inflating_pdf(PAGE_TEXTS, 2, in_form=in_form)  # 3 x 2 MB inflated, ~6 KB on disk
+    assert len(data) < 32 * 1024
+    monkeypatch.setattr(get_settings(), "max_pdf_uncompressed_mb", 5)
+    with pytest.raises(IngestionError) as info:
+        parse_pdf(data)
+    assert info.value.code == "file_too_large"
+    assert "5 MB" in info.value.message
+
+    monkeypatch.setattr(get_settings(), "max_pdf_uncompressed_mb", 7)  # the same file fits
+    parsed = parse_pdf(data)
+    assert [block.text for block in parsed.blocks] == PAGE_TEXTS
 
 
 @pytest.mark.parametrize(

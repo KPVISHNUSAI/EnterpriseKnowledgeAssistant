@@ -34,7 +34,11 @@ export default function WorkspacesPage() {
       {workspaces.isError ? (
         <ErrorNotice error={workspaces.error} title="Could not load workspaces" onRetry={() => workspaces.refetch()} />
       ) : workspaces.isPending ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Loading workspaces">
+        <div
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+          role="status"
+          aria-label="Loading workspaces"
+        >
           {Array.from({ length: 3 }, (_, i) => (
             <Skeleton key={i} className="h-32" />
           ))}
@@ -51,7 +55,7 @@ export default function WorkspacesPage() {
           action={createButton}
         />
       ) : (
-        <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" data-testid="workspace-list">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" data-testid="workspace-list">
           {workspaces.data.map((workspace) => (
             <li key={workspace.id}>
               <Card className="h-full transition-colors hover:border-slate-300">
