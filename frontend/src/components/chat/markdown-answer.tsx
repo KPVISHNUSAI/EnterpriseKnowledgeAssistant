@@ -46,6 +46,10 @@ function describeCitation(id: string, sources: SourceRef[], citations: Citation[
   return { verified, label: title ? `${title}${page ? `, page ${page}` : ""}` : undefined };
 }
 
+// A character that cannot continue an address: whitespace, quotes (also the typographic
+// ones word processors write), brackets and dashes.
+const STOP = `[\\s<>"'()[\\]{}“”‘’«»—–]`;
+
 /**
  * Whether a link the model wrote may be followed. A model misled by text planted in a
  * document can encode what it read into a URL, and one click would send that out. So a
@@ -57,10 +61,15 @@ function linkAllowed(href: string, sources: SourceRef[]): boolean {
   // Compared without the scheme, which autolinking adds to a bare address in the text.
   const address = href.replace(/^(?:https?:\/\/|mailto:)/i, "");
   if (!address) return false;
-  // It must start where an address can: "company-internal.example/x?key=1" in a passage
-  // must not vouch for "internal.example/x?key=1", a host anyone could register.
+  // It must be a whole address of the passage: "company-internal.example/x?key=1" must not
+  // vouch for "internal.example/x?key=1", nor "pay.acme.co.uk" for "pay.acme.co", nor
+  // "proxy.example/go/files.example/x" for "files.example/x": hosts anyone could register.
+  // Only a scheme may come right before it; punctuation or emphasis may end it.
   const literal = address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  const whole = new RegExp(`(?:^|[^\\p{L}\\p{N}_.+@-])${literal}`, "u");
+  const whole = new RegExp(
+    `(?:(?<![\\p{L}\\p{N}_.+@/=:-])|(?<=://|mailto:))${literal}(?=$|${STOP}|[.,;:!?*_~]+(?:$|${STOP}))`,
+    "u",
+  );
   return sources.some((s) => s.cited && !s.redacted && whole.test(s.excerpt ?? ""));
 }
 

@@ -161,6 +161,52 @@ describe("MarkdownAnswer rendering", () => {
     ]);
   });
 
+  it("does not let a link stop short of the end of an address in a passage", () => {
+    render(
+      <MarkdownAnswer
+        text={[
+          "[cut host](https://pay.acme.co)", // acme.co is not acme.co.uk
+          "[cut query](https://learnhub.example/courses?id=7)",
+          "[whole](https://pay.acme.co.uk/claims)",
+          "[before a full stop](https://learnhub.example/courses?id=7&lang=en)",
+        ].join("\n\n")}
+        sources={[
+          source("S1", {
+            excerpt:
+              "Claims: https://pay.acme.co.uk/claims (staff only). Courses: https://learnhub.example/courses?id=7&lang=en.",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(["whole", "before a full stop"]);
+    expect(screen.getAllByTestId("disabled-link").map((span) => span.textContent)).toEqual(["cut host", "cut query"]);
+  });
+
+  it("accepts an address in typographic quotes or emphasis, not one inside another address", () => {
+    const proxied = "https://proxy.corp.example/go/files.example.net/doc?key=s3cret";
+    render(
+      <MarkdownAnswer
+        text={[
+          "[quoted](https://wiki.acme.example/onboarding)",
+          "[bold](https://hr.acme.example/leave)",
+          `[proxied](${proxied})`,
+          "[inside a path](https://files.example.net/doc?key=s3cret)", // a host anyone may own
+          "[inside a query](https://pay.example/claim)",
+        ].join("\n\n")}
+        sources={[
+          source("S1", {
+            excerpt: `See “https://wiki.acme.example/onboarding” and **https://hr.acme.example/leave**, or ${proxied} and https://sso.example/?u=pay.example/claim.`,
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(["quoted", "bold", "proxied"]);
+    expect(screen.getAllByTestId("disabled-link").map((span) => span.textContent)).toEqual([
+      "inside a path",
+      "inside a query",
+    ]);
+  });
+
   it("keeps links disabled while the answer streams, before any source is marked cited", () => {
     const portal = "https://learnhub.example/courses";
     render(
