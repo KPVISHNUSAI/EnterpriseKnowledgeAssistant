@@ -94,11 +94,84 @@ describe("MarkdownAnswer rendering", () => {
     expect(container).toHaveTextContent("[S2]");
   });
 
-  it("opens external links safely and keeps internal ones in-page", () => {
-    render(<MarkdownAnswer text="[ext](https://example.com/a) and [int](/documents/1)" />);
-    expect(screen.getByRole("link", { name: "ext" })).toHaveAttribute("rel", "noopener noreferrer nofollow");
-    expect(screen.getByRole("link", { name: "ext" })).toHaveAttribute("target", "_blank");
-    expect(screen.getByRole("link", { name: "int" })).not.toHaveAttribute("target");
+  it("keeps a link live only when a cited passage the reader can open contains its address", () => {
+    const portal = "https://learnhub.example/courses?id=7";
+    render(
+      <MarkdownAnswer
+        text={[
+          `Book on [the portal](${portal}), see www.northwind.example or write to learning@northwind.example.`,
+          "[confirm](https://evil.example/?d=salary-250000)", // data a misled model encoded
+          "[uncited](https://other.example/page)",
+          "[revoked](https://hidden.example/page)",
+          "[internal](/documents/1) [sneaky](//evil.example/x) [leak](mailto:learning@northwind.example?body=secret)",
+        ].join("\n\n")}
+        sources={[
+          source("S1", {
+            excerpt: `Courses: ${portal}. Site: www.northwind.example. Contact learning@northwind.example. salary-250000`,
+          }),
+          source("S2", { cited: false, excerpt: "Read https://other.example/page" }),
+          source("S3", { redacted: true, excerpt: "https://hidden.example/page" }),
+        ]}
+      />,
+    );
+    const live = screen.getAllByRole("link");
+    expect(live.map((link) => link.getAttribute("href"))).toEqual([
+      portal,
+      "http://www.northwind.example",
+      "mailto:learning@northwind.example",
+    ]);
+    for (const link of live) {
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
+    }
+    const disabled = screen.getAllByTestId("disabled-link");
+    expect(disabled.map((span) => span.textContent)).toEqual([
+      "confirm",
+      "uncited",
+      "revoked",
+      "internal",
+      "sneaky",
+      "leak",
+    ]);
+    expect(disabled[0]).toHaveAttribute("title", "Link disabled: its address is not in a cited source");
+  });
+
+  it("does not let a link borrow the tail of a longer host or mail address in a passage", () => {
+    const claim = "https://claims.company-internal.example/expense?emp=4471&key=9f3c1a";
+    render(
+      <MarkdownAnswer
+        text={[
+          "[steal](https://internal.example/expense?emp=4471&key=9f3c1a)", // a host anyone can register
+          "[dot](https://company-internal.example/expense?emp=4471&key=9f3c1a)",
+          "[mail](mailto:payroll@acme.example)",
+          "[idn](https://cher.example/x)",
+          `[real](${claim})`,
+        ].join("\n\n")}
+        sources={[
+          source("S1", { excerpt: `File it at ${claim}, ask hr-payroll@acme.example, see https://bücher.example/x` }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([claim]);
+    expect(screen.getAllByTestId("disabled-link").map((span) => span.textContent)).toEqual([
+      "steal",
+      "dot",
+      "mail",
+      "idn",
+    ]);
+  });
+
+  it("keeps links disabled while the answer streams, before any source is marked cited", () => {
+    const portal = "https://learnhub.example/courses";
+    render(
+      <MarkdownAnswer
+        text={`[the portal](${portal})`}
+        sources={[source("S1", { cited: false, excerpt: portal })]}
+        streaming
+      />,
+    );
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByTestId("disabled-link")).toHaveTextContent("the portal");
   });
 });
 

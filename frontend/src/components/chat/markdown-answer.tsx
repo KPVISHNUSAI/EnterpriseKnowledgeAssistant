@@ -46,6 +46,24 @@ function describeCitation(id: string, sources: SourceRef[], citations: Citation[
   return { verified, label: title ? `${title}${page ? `, page ${page}` : ""}` : undefined };
 }
 
+/**
+ * Whether a link the model wrote may be followed. A model misled by text planted in a
+ * document can encode what it read into a URL, and one click would send that out. So a
+ * link is live only when a passage the answer cites, and the reader can open, contains
+ * its address: then the documents wrote it, not the model. In-page anchors stay live.
+ */
+function linkAllowed(href: string, sources: SourceRef[]): boolean {
+  if (href.startsWith("#")) return true;
+  // Compared without the scheme, which autolinking adds to a bare address in the text.
+  const address = href.replace(/^(?:https?:\/\/|mailto:)/i, "");
+  if (!address) return false;
+  // It must start where an address can: "company-internal.example/x?key=1" in a passage
+  // must not vouch for "internal.example/x?key=1", a host anyone could register.
+  const literal = address.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const whole = new RegExp(`(?:^|[^\\p{L}\\p{N}_.+@-])${literal}`, "u");
+  return sources.some((s) => s.cited && !s.redacted && whole.test(s.excerpt ?? ""));
+}
+
 interface Props {
   text: string;
   sources?: SourceRef[];
@@ -81,11 +99,22 @@ export const MarkdownAnswer = memo(function MarkdownAnswer({
             />
           );
         }
-        const external = typeof href === "string" && !href.startsWith("#") && !href.startsWith("/");
+        if (typeof href === "string" && linkAllowed(href, sources)) {
+          const external = !href.startsWith("#");
+          return (
+            <a href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer nofollow" } : {})}>
+              {children}
+            </a>
+          );
+        }
         return (
-          <a href={href} {...(external ? { target: "_blank", rel: "noopener noreferrer nofollow" } : {})}>
+          <span
+            data-testid="disabled-link"
+            title="Link disabled: its address is not in a cited source"
+            className="underline decoration-dotted underline-offset-2"
+          >
             {children}
-          </a>
+          </span>
         );
       },
       pre: CodeBlock,
