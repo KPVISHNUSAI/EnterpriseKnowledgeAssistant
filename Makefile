@@ -3,6 +3,7 @@
 UV := uv run --directory backend
 API_PORT ?= 8081
 EVAL_NAME ?= $(shell date +%Y-%m-%d)
+EVAL_LLM_CONFIGS ?= vector,hybrid,hybrid_rerank
 
 .PHONY: help check-ports infra-up infra-down docker-build up-app down-app migrate seed api worker beat test test-unit e2e eval eval-llm lint format typecheck check
 
@@ -56,7 +57,7 @@ eval: ## Retrieval + extractive evaluation (resets the eka_eval database; report
 	$(UV) python -m eval run --name $(EVAL_NAME)
 
 eval-llm: ## Add answers by an OpenAI-compatible LLM (Ollama llama3.1:8b by default) to the same report
-	$(UV) python -m eval run --name $(EVAL_NAME) --no-retrieval --no-extractive --llm-configs hybrid_rerank
+	$(UV) python -m eval run --name $(EVAL_NAME) --no-retrieval --no-extractive --llm-configs $(EVAL_LLM_CONFIGS)
 
 lint: ## Lint and format check
 	$(UV) ruff check .

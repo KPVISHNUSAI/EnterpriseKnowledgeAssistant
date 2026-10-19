@@ -369,7 +369,7 @@ security active.
 
 ```bash
 make eval        # retrieval for every configuration plus the offline extractive generator (minutes)
-make eval-llm    # adds answers by llama3.1:8b on Ollama for hybrid + rerank (about an hour on a laptop)
+make eval-llm    # adds llama3.1:8b answers (Ollama) for vector, hybrid and hybrid + rerank (over an hour on a laptop)
 ```
 
 Each run writes JSON results and a Markdown report to `backend/eval/reports/<date>/`. The
