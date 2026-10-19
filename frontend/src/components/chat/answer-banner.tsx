@@ -24,6 +24,15 @@ export function answerNotice(message: DisplayMessage): Notice | null {
       requestId: message.error.requestId,
     };
   }
+  if (message.redacted) {
+    return {
+      tone: "info",
+      title: "Answer hidden",
+      body: "This answer drew on a document you can no longer open, so its text is no longer shown.",
+      status: "redacted",
+      placement: "top",
+    };
+  }
   switch (answerStatus) {
     case "insufficient_evidence":
       return {

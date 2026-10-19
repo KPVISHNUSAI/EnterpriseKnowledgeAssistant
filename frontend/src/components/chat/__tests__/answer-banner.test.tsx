@@ -32,6 +32,14 @@ describe("answerNotice", () => {
     expect(notice?.status).toBe(answerStatus);
   });
 
+  it("explains a withheld answer before anything else about it", () => {
+    expect(answerNotice(message({ redacted: true, content: "", answerStatus: "partial" }))).toMatchObject({
+      title: "Answer hidden",
+      status: "redacted",
+      placement: "top",
+    });
+  });
+
   it("explains a stopped (incomplete) answer after the text", () => {
     expect(answerNotice(message({ status: "incomplete", answerStatus: null }))).toMatchObject({
       title: "Generation stopped",

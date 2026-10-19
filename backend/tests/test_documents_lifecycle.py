@@ -297,7 +297,22 @@ def test_delete_removes_everything_derived_from_the_document(
         sources=untouched_sources,
         retrieval_metadata={"citations": [_citation(keep_id, "S1")]},
     )
-    db.add_all([message, untouched])
+    # A follow-up whose own sources are unrelated, but whose prompt held `message`.
+    inherited_sources = [_source(keep_id, "S1", ws)]
+    inherited = Message(
+        conversation_id=conversation.id,
+        organization_id=tenant.org.id,
+        role=MessageRole.ASSISTANT,
+        content="As said, Berlin closes in March [S1].",
+        sources=inherited_sources,
+        retrieval_metadata={
+            "citations": [_citation(keep_id, "S1")],
+            "history_document_ids": [str(doc_id)],
+            "search_query": "when does the berlin office close",
+            "unverified_quotes": ["Berlin closes in March"],
+        },
+    )
+    db.add_all([message, untouched, inherited])
     db.commit()
 
     response = client.delete(f"{API}/{doc_id}")
@@ -313,6 +328,7 @@ def test_delete_removes_everything_derived_from_the_document(
     assert invalidated == [(tenant.org.id, sorted(chunk.content_hash for chunk in chunks))]
 
     scrubbed = db.get(Message, message.id)
+    assert scrubbed.content == ""  # the answer restated the document
     deleted_source, kept_source = scrubbed.sources
     assert deleted_source == {
         **_source(doc_id, "S1", ws),
@@ -334,7 +350,15 @@ def test_delete_removes_everything_derived_from_the_document(
     # The scrubbed payloads still satisfy the chat contract.
     SourceRef.model_validate(deleted_source)
     CitationOut.model_validate(deleted_citation)
-    assert db.get(Message, untouched.id).sources == untouched_sources
+    kept = db.get(Message, untouched.id)
+    assert (kept.content, kept.sources) == ("Other answer [S1].", untouched_sources)
+    later = db.get(Message, inherited.id)
+    assert (later.content, later.sources) == ("", inherited_sources)
+    # Text derived from the answer goes too; the document id stays, so reads withhold it.
+    assert later.retrieval_metadata == {
+        "citations": [_citation(keep_id, "S1")],
+        "history_document_ids": [str(doc_id)],
+    }
 
     event = db.scalars(select(AuditEvent).where(AuditEvent.action == "document.deleted")).one()
     assert event.event_metadata["title"] == "notes"

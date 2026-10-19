@@ -28,12 +28,33 @@ def fake_llm(app):
     return llm
 
 
-def chat(client, message=QUESTION, conversation_id=None) -> str:
+def chat(client, message=QUESTION, conversation_id=None, scope=None) -> str:
     response = client.post(
-        "/api/v1/chat", json={"message": message, "conversation_id": conversation_id}
+        "/api/v1/chat",
+        json={"message": message, "conversation_id": conversation_id, "scope": scope or {}},
     )
     assert response.status_code == 200, response.text
     return response.json()["conversation_id"]
+
+
+def revoke(db, tenant, document) -> None:
+    """Make the document restricted: the viewer (no grant, not the uploader) loses access."""
+    set_tenant(db, tenant.org.id)
+    db.execute(delete(DocumentPermission).where(DocumentPermission.document_id == document.id))
+    db.commit()
+
+
+def grant(db, tenant, document) -> None:
+    db.add(
+        DocumentPermission(
+            document_id=document.id,
+            organization_id=tenant.org.id,
+            principal_type=PrincipalType.USER,
+            principal_id=tenant.viewer.id,
+            permission=PermissionLevel.READ,
+        )
+    )
+    db.commit()
 
 
 def test_list_is_private_newest_first_and_counted(login_as, tenant, handbook, fake_llm):
@@ -85,19 +106,22 @@ def test_messages_are_chronological_and_private(login_as, tenant, other_tenant, 
     assert viewer.get(f"{CONVERSATIONS}/{uuid.uuid4()}/messages").status_code == 404
 
 
-def test_sources_are_redacted_once_access_is_revoked(login_as, tenant, handbook, fake_llm, db):
+def test_answer_and_sources_are_withheld_once_access_is_revoked(
+    login_as, tenant, handbook, fake_llm, db
+):
     viewer = login_as(tenant.viewer, tenant.org)
     conversation_id = chat(viewer)
     url = f"{CONVERSATIONS}/{conversation_id}/messages"
     before = viewer.get(url).json()["items"][1]
     assert before["sources"][0]["excerpt"] == LEAVE and not before["sources"][0]["redacted"]
+    assert "25 days" in before["content"] and not before["redacted"]
 
-    # Make the handbook restricted: the viewer (no grant, not the uploader) loses access.
-    set_tenant(db, tenant.org.id)
-    db.execute(delete(DocumentPermission).where(DocumentPermission.document_id == handbook.id))
-    db.commit()
-    after = viewer.get(url).json()["items"][1]
-    assert after["content"] == before["content"] and after["answer_status"] == "answered"
+    revoke(db, tenant, handbook)
+    question, after = viewer.get(url).json()["items"]
+    assert question["content"] == QUESTION and not question["redacted"]  # the caller's words
+    # The answer restates the document, so it goes with the excerpts.
+    assert (after["content"], after["redacted"], after["answer_status"]) == ("", True, "answered")
+    assert "search_query" not in after["metadata"] and after["metadata"]["mode"] == "hybrid"
     for source in after["sources"]:
         assert (source["excerpt"], source["section_title"], source["redacted"]) == (
             None,
@@ -108,20 +132,60 @@ def test_sources_are_redacted_once_access_is_revoked(login_as, tenant, handbook,
     (citation,) = after["citations"]
     assert (citation["excerpt"], citation["redacted"], citation["verified"]) == (None, True, True)
     # The stored row is untouched: redaction happens at read time.
-    assert db.get(Message, uuid.UUID(after["id"])).sources[0]["excerpt"] == LEAVE
+    stored = db.get(Message, uuid.UUID(after["id"]))
+    assert stored.sources[0]["excerpt"] == LEAVE and stored.content == before["content"]
 
-    db.add(
-        DocumentPermission(
-            document_id=handbook.id,
-            organization_id=tenant.org.id,
-            principal_type=PrincipalType.USER,
-            principal_id=tenant.viewer.id,
-            permission=PermissionLevel.READ,
-        )
-    )
-    db.commit()
+    grant(db, tenant, handbook)
     restored = viewer.get(url).json()["items"][1]
     assert restored["sources"][0]["excerpt"] == LEAVE and not restored["citations"][0]["redacted"]
+    assert (restored["content"], restored["redacted"]) == (before["content"], False)
+    assert restored["metadata"] == before["metadata"]
+
+
+def test_answers_that_built_on_a_withheld_answer_are_withheld_and_kept_out_of_prompts(
+    login_as, factory, tenant, handbook, fake_llm, db
+):
+    """A follow-up's prompt holds the earlier answer, so it can restate the document
+    behind that answer even when its own sources stay readable."""
+    menu = factory.document(tenant.workspace, uploaded_by=tenant.editor, title="Cafeteria menu")
+    factory.chunks(menu, ["Lunch is served from noon until 2pm on weekdays."])
+    only_menu = {"document_ids": [str(menu.id)]}
+    viewer = login_as(tenant.viewer, tenant.org)
+    conversation_id = chat(viewer, scope={"document_ids": [str(handbook.id)]})
+    chat(viewer, "When is lunch?", conversation_id, scope=only_menu)
+    url = f"{CONVERSATIONS}/{conversation_id}/messages"
+
+    def answers() -> list[dict]:
+        return [m for m in viewer.get(url).json()["items"] if m["role"] == "assistant"]
+
+    first, follow_up = answers()
+    assert {s["document_id"] for s in follow_up["sources"]} == {str(menu.id)}
+    set_tenant(db, tenant.org.id)
+    stored = db.get(Message, uuid.UUID(follow_up["id"])).retrieval_metadata
+    assert stored["history_document_ids"] == [str(handbook.id)]
+    assert "history_document_ids" not in follow_up["metadata"]  # internal bookkeeping
+
+    revoke(db, tenant, handbook)
+    first, follow_up = answers()
+    assert first["redacted"] and follow_up["redacted"] and follow_up["content"] == ""
+    assert follow_up["sources"][0]["excerpt"] is not None  # its own source is still readable
+
+    # The next turn's prompts keep the questions but none of the withheld answers.
+    fake_llm.requests.clear()
+    chat(viewer, "And on Fridays?", conversation_id, scope=only_menu)
+    (rewrite,) = fake_llm.rewrite_requests
+    (answer,) = fake_llm.answer_requests
+    rewrite_prompt = " ".join(m.content for m in rewrite.messages)
+    answer_prompt = " ".join(m.content for m in answer.messages)
+    assert "When is lunch?" in rewrite_prompt and "Lunch is served" in answer_prompt
+    assert "25 days" not in rewrite_prompt and "25 days" not in answer_prompt
+    *_, latest = answers()
+    assert not latest["redacted"] and latest["content"]  # it never saw the withheld text
+    latest_stored = db.get(Message, uuid.UUID(latest["id"])).retrieval_metadata
+    assert "history_document_ids" not in latest_stored
+
+    grant(db, tenant, handbook)
+    assert [a["redacted"] for a in answers()] == [False, False, False]
 
 
 def test_delete_removes_messages_and_is_audited(login_as, tenant, handbook, fake_llm, db):

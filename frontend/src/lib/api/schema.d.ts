@@ -1461,6 +1461,12 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Redacted
+             * @description True when the answer is withheld (content is empty) because it drew on a document the caller can no longer read, directly or through earlier answers.
+             * @default false
+             */
+            redacted: boolean;
+            /**
              * Created At
              * Format: date-time
              */

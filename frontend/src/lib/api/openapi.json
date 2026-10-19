@@ -5403,6 +5403,12 @@
             "title": "Metadata",
             "description": "Retrieval summary: search_query, mode, reranked, timings_ms, usage."
           },
+          "redacted": {
+            "type": "boolean",
+            "title": "Redacted",
+            "description": "True when the answer is withheld (content is empty) because it drew on a document the caller can no longer read, directly or through earlier answers.",
+            "default": false
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",

@@ -226,6 +226,37 @@ def test_abandoned_producer_still_persists_the_partial_answer(produce, db, tenan
     assert db.scalar(select(func.count()).select_from(Message)) == 2
 
 
+def test_streamed_follow_ups_record_the_documents_behind_their_history(
+    app, login_as, tenant, handbook, produce, db
+):
+    """Finished and abandoned follow-ups both store what reached them through the history,
+    so they are withheld along with the answers they build on (see test_conversations)."""
+    app.dependency_overrides[get_llm] = lambda: FakeLLM(chunk=4)
+    client = login_as(tenant.viewer, tenant.org)
+    _, first = stream(client)
+    conversation_id = first[0][1]["conversation_id"]
+    _, follow_up = stream(client, conversation_id=conversation_id)
+    cancel = threading.Event()
+    slow = FakeLLM(LONG_ANSWER, chunk=3, delay=0.002)
+    generator = produce(slow, conversation_id=uuid.UUID(conversation_id))(cancel)
+    events = [decode(next(generator))]
+    while events[-1][0] != "token":
+        events.append(decode(next(generator)))
+    cancel.set()
+    generator.close()
+
+    set_tenant(db, tenant.org.id)
+
+    def stored(meta: dict) -> Message:
+        return db.get(Message, uuid.UUID(meta["assistant_message_id"]))
+
+    assert "history_document_ids" not in stored(first[0][1]).retrieval_metadata
+    assert stored(follow_up[0][1]).retrieval_metadata["history_document_ids"] == [str(handbook.id)]
+    abandoned = stored(events[0][1])
+    assert abandoned.status == MessageStatus.INCOMPLETE
+    assert abandoned.retrieval_metadata["history_document_ids"] == [str(handbook.id)]
+
+
 def test_producer_abandoned_right_after_meta_closes_the_message(produce, db, tenant):
     """The client can leave before the bridge resumes the producer past its first event."""
     llm = FakeLLM()

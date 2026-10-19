@@ -88,6 +88,11 @@ class MessageOut(BaseModel):
         default_factory=dict,
         description="Retrieval summary: search_query, mode, reranked, timings_ms, usage.",
     )
+    redacted: bool = Field(
+        default=False,
+        description="True when the answer is withheld (content is empty) because it drew on a"
+        " document the caller can no longer read, directly or through earlier answers.",
+    )
     created_at: datetime
 
 

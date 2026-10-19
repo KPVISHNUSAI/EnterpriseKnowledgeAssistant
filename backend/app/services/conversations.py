@@ -1,12 +1,14 @@
 """Conversation history, private to its owner within the active organization.
 
 Stored sources and citations are rendered from the message's JSON; when the caller can
-no longer read a cited document (access revoked, document deleted), the excerpt is
-redacted at read time through the same access predicate every read path uses."""
+no longer read a document an answer drew on (access revoked, document deleted), its
+excerpts are redacted and the answer itself is withheld, at read time, through the same
+access predicate every read path uses."""
 
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
@@ -18,6 +20,24 @@ from app.schemas.common import Page, PageParams
 from app.services import access, audit
 from app.services.access import Principal
 from app.services.audit import AuditAction, RequestMeta
+
+# Message.retrieval_metadata key set by app/services/chat.py: the documents behind the
+# earlier answers that were part of this answer's prompt as conversation history.
+HISTORY_DOCUMENTS = "history_document_ids"
+# Metadata that can quote the answer or the history; withheld along with the answer.
+_DERIVED = ("search_query", "unverified_quotes")
+
+
+def document_ids(message: Message) -> set[uuid.UUID]:
+    """Every document an answer may draw on: its own passages and, through the history
+    in its prompt, those of earlier answers. Any of them can surface in it, cited or not."""
+    refs = [source["document_id"] for source in message.sources or []]
+    refs += (message.retrieval_metadata or {}).get(HISTORY_DOCUMENTS, [])
+    return {uuid.UUID(ref) for ref in refs}
+
+
+def without_derived(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in metadata.items() if key not in _DERIVED}
 
 
 def own_conversation(db: Session, principal: Principal, conversation_id: uuid.UUID) -> Conversation:
@@ -87,16 +107,14 @@ def list_messages(
         .offset(page.offset)
         .limit(page.page_size)
     ).all()
-    messages = [message_out(row) for row in rows]
-    cited = {source.document_id for message in messages for source in message.sources} | {
-        citation.document_id
-        for message in messages
-        for citation in message.citations
-        if citation.document_id is not None
-    }
-    readable = access.readable_document_ids(db, principal, cited)
+    # Citations only ever point at a message's own sources, so these cover them too.
+    used = {row.id: document_ids(row) for row in rows}
+    readable = access.readable_document_ids(db, principal, set().union(*used.values()))
     return Page(
-        items=[_redact(message, readable) for message in messages],
+        items=[
+            _redact(message_out(row), readable, withhold=not used[row.id] <= readable)
+            for row in rows
+        ],
         total=db.scalar(select(func.count()).where(in_conversation)) or 0,
         page=page.page,
         page_size=page.page_size,
@@ -126,6 +144,7 @@ def message_out(message: Message) -> MessageOut:
     metadata = dict(message.retrieval_metadata or {})
     answer_status = metadata.pop("answer_status", None)
     citations = metadata.pop("citations", [])
+    metadata.pop(HISTORY_DOCUMENTS, None)  # read by document_ids, not part of the contract
     return MessageOut(
         id=message.id,
         conversation_id=message.conversation_id,
@@ -140,19 +159,21 @@ def message_out(message: Message) -> MessageOut:
     )
 
 
-def _redact(message: MessageOut, readable: set[uuid.UUID]) -> MessageOut:
+def _redact(message: MessageOut, readable: set[uuid.UUID], *, withhold: bool) -> MessageOut:
     """Blank the text of sources and citations whose document the caller cannot read now
-    (section titles are document text too). Titles stay: the caller saw them already."""
+    (section titles are document text too). Titles stay: the caller saw them already.
+    `withhold` also hides the answer, which may restate such a document in its own words.
+    The stored row is untouched, so restoring access brings everything back."""
     hidden = {"excerpt": None, "section_title": None, "redacted": True}
-    return message.model_copy(
-        update={
-            "sources": [
-                s if s.document_id in readable else s.model_copy(update=hidden)
-                for s in message.sources
-            ],
-            "citations": [
-                c if c.document_id in readable else c.model_copy(update=hidden)
-                for c in message.citations
-            ],
-        }
-    )
+    update: dict[str, Any] = {
+        "sources": [
+            s if s.document_id in readable else s.model_copy(update=hidden) for s in message.sources
+        ],
+        "citations": [
+            c if c.document_id in readable else c.model_copy(update=hidden)
+            for c in message.citations
+        ],
+    }
+    if withhold:
+        update |= {"content": "", "redacted": True, "metadata": without_derived(message.metadata)}
+    return message.model_copy(update=update)

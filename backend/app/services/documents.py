@@ -57,6 +57,7 @@ from app.schemas.documents import (
 from app.services import access, audit, uploads
 from app.services.access import Principal
 from app.services.audit import AuditAction, RequestMeta
+from app.services.conversations import HISTORY_DOCUMENTS, without_derived
 from app.storage import ObjectStorage, StorageError, build_storage_key
 from app.storage.s3 import content_disposition
 from app.worker import queue
@@ -498,18 +499,29 @@ def _scrub(items: Any, document_ref: str, redacted: dict[str, Any]) -> Any:
 
 
 def _scrub_conversation_history(db: Session, document_id: uuid.UUID) -> None:
-    """Remove a deleted document's text from stored answers' sources and citations
-    (section titles are document text too). The GIN index serves the containment test.
+    """Remove a deleted document's text from stored answers: from their sources and
+    citations (section titles are document text too), and the answer text itself of every
+    answer that drew on it, directly or through the history in its prompt. The document id
+    stays in the sources, so reads keep withholding those answers (conversations._redact).
 
-    ponytail: loads matching messages into Python; move to a jsonb UPDATE if a single
-    document is ever cited by very many messages."""
+    ponytail: loads matching messages into Python, and only the sources test has a GIN
+    index (the history test scans the organization's messages); move to jsonb UPDATEs and
+    index retrieval_metadata if a single document is ever behind very many messages."""
     document_ref = str(document_id)
     messages = db.scalars(
         select(Message)
-        .options(load_only(Message.id, Message.sources, Message.retrieval_metadata))
-        .where(Message.sources.contains([{"document_id": document_ref}]))
+        .options(
+            load_only(Message.id, Message.content, Message.sources, Message.retrieval_metadata)
+        )
+        .where(
+            or_(
+                Message.sources.contains([{"document_id": document_ref}]),
+                Message.retrieval_metadata.contains({HISTORY_DOCUMENTS: [document_ref]}),
+            )
+        )
     )
     for message in messages:
+        message.content = ""
         message.sources = _scrub(
             message.sources,
             document_ref,
@@ -521,15 +533,15 @@ def _scrub_conversation_history(db: Session, document_id: uuid.UUID) -> None:
             },
         )
         metadata = message.retrieval_metadata
-        if isinstance(metadata, dict) and "citations" in metadata:
-            message.retrieval_metadata = {
-                **metadata,
-                "citations": _scrub(
+        if isinstance(metadata, dict):
+            metadata = without_derived(metadata)
+            if "citations" in metadata:
+                metadata["citations"] = _scrub(
                     metadata["citations"],
                     document_ref,
                     {"excerpt": None, "document_title": _DELETED_TITLE, "section_title": None},
-                ),
-            }
+                )
+            message.retrieval_metadata = metadata
 
 
 def delete_document(

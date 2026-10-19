@@ -10,6 +10,8 @@ export interface DisplayMessage {
   answerStatus: AnswerStatus | null;
   sources: SourceRef[];
   citations: Citation[];
+  /** The answer drew on a document the reader can no longer open, so its text is withheld. */
+  redacted?: boolean;
   /** Set while the answer is still being produced. */
   streaming?: boolean;
   /** Stage text shown before the first token ("Searching your documents..."). */
@@ -25,6 +27,7 @@ export const fromMessage = (message: Message): DisplayMessage => ({
   answerStatus: message.answer_status ?? null,
   sources: message.sources ?? [],
   citations: message.citations ?? [],
+  redacted: message.redacted,
 });
 
 export function toChatScope(scope: Scope): ChatScope {

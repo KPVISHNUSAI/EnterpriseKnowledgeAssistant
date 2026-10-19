@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -54,9 +55,14 @@ from app.schemas.chat import (
     StreamSourcesEvent,
     StreamTokenEvent,
 )
-from app.services import usage
+from app.services import access, usage
 from app.services.access import Principal
-from app.services.conversations import message_out, own_conversation
+from app.services.conversations import (
+    HISTORY_DOCUMENTS,
+    document_ids,
+    message_out,
+    own_conversation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +82,7 @@ def chat(
     settings = get_settings()
     question = normalize_query(body.message, max_chars=settings.max_query_chars)
     conversation = _conversation(db, principal, body, question)
-    history = _history(db, conversation)
+    history, history_documents = _history(db, principal, conversation)
     user_message = _message(conversation, MessageRole.USER, question)
     db.add(user_message)
     result: AnswerResult | None = None
@@ -96,7 +102,7 @@ def chat(
             result = event.result
     assert result is not None  # noqa: S101 - the pipeline always completes
     assistant = _message(conversation, MessageRole.ASSISTANT, "")
-    fill_message(assistant, result, _final_status(result))
+    fill_message(assistant, result, _final_status(result), history_documents)
     db.add(assistant)
     db.flush()  # assigns the id the usage row refers to
     conversation.updated_at = utcnow()
@@ -130,7 +136,7 @@ def start_chat_stream(
     settings = get_settings()
     question = normalize_query(body.message, max_chars=settings.max_query_chars)
     conversation = _conversation(db, principal, body, question)
-    history = _history(db, conversation)
+    history, history_documents = _history(db, principal, conversation)
     user_message = _message(conversation, MessageRole.USER, question)
     placeholder = _message(conversation, MessageRole.ASSISTANT, "", status=MessageStatus.STREAMING)
     db.add_all([user_message, placeholder])
@@ -212,7 +218,7 @@ def start_chat_stream(
             if message is None:  # the conversation was deleted meanwhile
                 return None
             if state.result is not None:
-                fill_message(message, state.result, _final_status(state.result))
+                fill_message(message, state.result, _final_status(state.result), history_documents)
                 usage.record(
                     session,
                     organization_id=principal.organization_id,
@@ -231,6 +237,7 @@ def start_chat_stream(
                 message.retrieval_metadata = {
                     "search_query": state.search_query,
                     **({"error": {"code": state.error[0]}} if state.error else {}),
+                    **_history_metadata(history_documents),
                 }
             session.commit()
             return message
@@ -269,7 +276,12 @@ def _terminal_event(state: _StreamState, message: Message | None) -> bytes:
 # --- Persistence helpers -------------------------------------------------------------------
 
 
-def fill_message(message: Message, result: AnswerResult, status: MessageStatus) -> None:
+def fill_message(
+    message: Message,
+    result: AnswerResult,
+    status: MessageStatus,
+    history_documents: set[uuid.UUID],
+) -> None:
     cited = {citation.source_id for citation in result.citations if citation.verified}
     message.content = result.answer
     message.status = status
@@ -277,7 +289,13 @@ def fill_message(message: Message, result: AnswerResult, status: MessageStatus) 
         source_ref(passage, cited=passage.source_id in cited).model_dump(mode="json")
         for passage in result.passages
     ]
-    message.retrieval_metadata = answer_metadata(result)
+    message.retrieval_metadata = answer_metadata(result) | _history_metadata(history_documents)
+
+
+def _history_metadata(documents: set[uuid.UUID]) -> dict[str, Any]:
+    """What the answer inherited through its prompt's history, so it is withheld (and
+    erased on deletion) along with the answers it builds on."""
+    return {HISTORY_DOCUMENTS: sorted(map(str, documents))} if documents else {}
 
 
 def source_ref(passage: ContextPassage, *, cited: bool) -> SourceRef:
@@ -369,8 +387,13 @@ def _title(message: str, question: str) -> str:
         return normalize_query(question, max_chars=_TITLE_CHARS)
 
 
-def _history(db: Session, conversation: Conversation) -> list[ChatTurn]:
-    """The last CHAT_HISTORY_MESSAGES complete turns, oldest first."""
+def _history(
+    db: Session, principal: Principal, conversation: Conversation
+) -> tuple[list[ChatTurn], set[uuid.UUID]]:
+    """The last CHAT_HISTORY_MESSAGES complete turns, oldest first, and the documents the
+    answers among them drew on. An answer that drew on a document the caller can no
+    longer read is left out, as it is withheld from the conversation: its text must not
+    reach a new prompt (see conversations._redact)."""
     rows = db.scalars(
         select(Message)
         .where(
@@ -381,10 +404,14 @@ def _history(db: Session, conversation: Conversation) -> list[ChatTurn]:
         .order_by(Message.created_at.desc(), Message.role.asc())
         .limit(get_settings().chat_history_messages)
     ).all()
-    return [
+    used = {row.id: document_ids(row) for row in rows}
+    readable = access.readable_document_ids(db, principal, set().union(*used.values()))
+    kept = [row for row in reversed(rows) if used[row.id] <= readable]
+    turns = [
         ChatTurn(role="user" if row.role == MessageRole.USER else "assistant", content=row.content)
-        for row in reversed(rows)
+        for row in kept
     ]
+    return turns, set().union(*(used[row.id] for row in kept))
 
 
 def _message(

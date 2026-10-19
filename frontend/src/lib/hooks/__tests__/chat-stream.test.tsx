@@ -28,6 +28,7 @@ const message = (overrides: Partial<Message> = {}): Message => ({
   sources: [makeSource("S1")],
   citations: [],
   metadata: {},
+  redacted: false,
   created_at: "2026-01-01T00:00:00Z",
   ...overrides,
 });

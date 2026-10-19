@@ -228,11 +228,15 @@ test("workspace membership and sharing changes reach the employee immediately", 
     await employee.page.goto(`/documents/${handbook.id}`);
     await expect(employee.page.getByRole("heading", { name: "Document not found" })).toBeVisible();
 
-    // The earlier answer is still in the employee's history, but its source text is hidden now.
+    // The earlier answer stays in the employee's history, but nothing of the memo is shown:
+    // not its passages, and not the answer that restated them.
     await employee.page.goto("/chat");
     await employee.page.getByTestId("conversation-list").getByRole("link").first().click();
     await expect(employee.page.getByTestId("user-message")).toHaveText(SECRET_QUESTION);
-    await employee.page.getByTestId("open-sources").click();
+    const answer = employee.page.getByTestId("assistant-message");
+    await expect(answer.getByTestId("answer-banner")).toHaveAttribute("data-status", "redacted");
+    await expect(answer).not.toContainText("zephyrquartz");
+    await answer.getByTestId("open-sources").click();
     const panel = employee.page.getByTestId("source-panel");
     await expect(panel).not.toContainText("zephyrquartz");
     await expect(panel.getByTestId("source-item").first()).toHaveAttribute("data-redacted", "true");
