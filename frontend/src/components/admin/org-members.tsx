@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, UserCheck, UserX } from "lucide-react";
 import { useSession } from "@/components/auth/session";
 import { IconButton } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
-import { EmptyState, ErrorNotice, SkeletonRows } from "@/components/ui/feedback";
+import { Badge, EmptyState, ErrorNotice, SkeletonRows } from "@/components/ui/feedback";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Pagination } from "@/components/ui/pagination";
 import { Time } from "@/components/ui/time";
@@ -24,12 +24,14 @@ export function OrgMembers() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const members = useOrgMembers({ q: q || undefined, page, page_size: pageSize });
-  const { changeRole, remove } = useOrgMemberActions();
+  const { changeRole, remove, setActive } = useOrgMemberActions();
   const onSearch = useDebouncedCallback((value: string) => {
     setQ(value);
     setPage(1);
   }, 300);
-  const actionError = changeRole.error ?? remove.error;
+  const actionError = changeRole.error ?? remove.error ?? setActive.error;
+  // One change at a time, so two actions on the same member cannot overlap.
+  const busy = changeRole.isPending || remove.isPending || setActive.isPending;
 
   async function onRemove(userId: string, name: string) {
     const ok = await confirm({
@@ -40,6 +42,17 @@ export function OrgMembers() {
       destructive: true,
     });
     if (ok) remove.mutate(userId);
+  }
+
+  async function onDeactivate(userId: string, name: string) {
+    const ok = await confirm({
+      title: `Deactivate ${name}?`,
+      description:
+        "They are signed out everywhere and cannot sign in until reactivated. Their workspaces, document access and conversations are kept.",
+      confirmLabel: "Deactivate",
+      destructive: true,
+    });
+    if (ok) setActive.mutate({ userId, active: false });
   }
 
   return (
@@ -111,6 +124,7 @@ export function OrgMembers() {
                             {member.user_id === user.id ? (
                               <span className="font-normal text-slate-500">(you)</span>
                             ) : null}
+                            {member.is_active ? null : <Badge tone="warning">Deactivated</Badge>}
                           </p>
                           <p className="truncate text-xs text-slate-500">{member.email}</p>
                         </div>
@@ -121,7 +135,7 @@ export function OrgMembers() {
                         aria-label={`Role of ${member.full_name}`}
                         className="h-8 w-48 text-[13px]"
                         value={member.role}
-                        disabled={changeRole.isPending}
+                        disabled={busy}
                         onChange={(e) => changeRole.mutate({ userId: member.user_id, role: e.target.value as OrgRole })}
                       >
                         {ORG_ROLES.map((role) => (
@@ -134,10 +148,27 @@ export function OrgMembers() {
                     <td className="hidden px-4 py-3 text-sm text-slate-600 sm:table-cell">
                       <Time iso={member.joined_at} />
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {member.user_id === user.id ? null : member.is_active ? (
+                        <IconButton
+                          label={`Deactivate ${member.full_name}`}
+                          disabled={busy}
+                          onClick={() => onDeactivate(member.user_id, member.full_name)}
+                        >
+                          <UserX aria-hidden className="size-4" />
+                        </IconButton>
+                      ) : (
+                        <IconButton
+                          label={`Reactivate ${member.full_name}`}
+                          disabled={busy}
+                          onClick={() => setActive.mutate({ userId: member.user_id, active: true })}
+                        >
+                          <UserCheck aria-hidden className="size-4" />
+                        </IconButton>
+                      )}
                       <IconButton
                         label={`Remove ${member.full_name}`}
-                        disabled={remove.isPending}
+                        disabled={busy}
                         onClick={() => onRemove(member.user_id, member.full_name)}
                       >
                         <Trash2 aria-hidden className="size-4" />

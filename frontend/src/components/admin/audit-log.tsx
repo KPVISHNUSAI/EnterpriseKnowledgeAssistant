@@ -15,8 +15,17 @@ import { useAuditEvents } from "@/lib/hooks/admin";
 import { useDebouncedCallback } from "@/lib/hooks/url-state";
 
 // Stable event families (backend/app/services/audit.py); the field also accepts any exact action.
-const ACTION_SUGGESTIONS = ["auth.*", "organization.*", "workspace.*", "document.*", "conversation.*", "security.*"];
-const RESOURCE_SUGGESTIONS = ["document", "workspace", "user", "conversation", "invitation", "endpoint"];
+const ACTION_SUGGESTIONS = [
+  "auth.*",
+  "organization.*",
+  "workspace.*",
+  "document.*",
+  "conversation.*",
+  "chat.*",
+  "search.*",
+  "security.*",
+];
+const RESOURCE_SUGGESTIONS = ["document", "workspace", "user", "conversation", "message", "invitation", "endpoint"];
 
 const toIso = (local: string) => (local ? new Date(local).toISOString() : undefined);
 

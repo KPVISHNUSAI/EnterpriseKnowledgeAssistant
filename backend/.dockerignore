@@ -7,4 +7,5 @@
 !alembic.ini
 !alembic/
 !app/
+!scripts/create_organization.py
 **/__pycache__

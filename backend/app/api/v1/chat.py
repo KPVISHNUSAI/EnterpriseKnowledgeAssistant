@@ -47,6 +47,7 @@ async def chat(
     embedder: EmbeddingProvider = Depends(get_embedder),
     reranker: Reranker | None = Depends(get_reranker),
     llm: LLMProvider | None = Depends(get_llm),
+    meta: RequestMeta = Depends(get_request_meta),
 ) -> ChatResponse:
     """Ask a question; returns the grounded answer with validated citations.
 
@@ -56,7 +57,14 @@ async def chat(
     answer.
     """
     answer = partial(
-        chat_service.chat, db, principal, body, embedder=embedder, reranker=reranker, llm=llm
+        chat_service.chat,
+        db,
+        principal,
+        body,
+        embedder=embedder,
+        reranker=reranker,
+        llm=llm,
+        meta=meta,
     )
     return await to_thread.run_sync(answer, limiter=_generation_threads)
 
@@ -80,6 +88,7 @@ def chat_stream(
     embedder: EmbeddingProvider = Depends(get_embedder),
     reranker: Reranker | None = Depends(get_reranker),
     llm: LLMProvider | None = Depends(get_llm),
+    meta: RequestMeta = Depends(get_request_meta),
 ) -> StreamingResponse:
     """Same as POST /chat, streamed as Server-Sent Events (see the 200 response).
 
@@ -88,7 +97,7 @@ def chat_stream(
     the partial answer is saved with status `incomplete`.
     """
     produce = chat_service.start_chat_stream(
-        db, principal, body, embedder=embedder, reranker=reranker, llm=llm
+        db, principal, body, embedder=embedder, reranker=reranker, llm=llm, meta=meta
     )
     return StreamingResponse(
         stream_from_thread(produce), media_type="text/event-stream", headers=SSE_HEADERS

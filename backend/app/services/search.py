@@ -25,7 +25,9 @@ from app.schemas.search import (
     SearchResponse,
     SearchResult,
 )
+from app.services import audit
 from app.services.access import Principal
+from app.services.audit import AuditAction, RequestMeta
 
 
 def search(
@@ -35,6 +37,7 @@ def search(
     *,
     embedder: EmbeddingProvider,
     reranker: Reranker | None,
+    meta: RequestMeta,
 ) -> SearchResponse:
     """Passages the caller can read, best first, each explaining why it matched.
     A rerank request without a configured reranker returns RRF order (reranked=false)."""
@@ -72,6 +75,19 @@ def search(
             select(Workspace.id, Workspace.name).where(Workspace.id.in_(workspace_ids))
         )
     }
+    audit.record(
+        db,
+        AuditAction.SEARCH_PERFORMED,
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        metadata={
+            "mode": options.mode,
+            "results": len(result.candidates),
+            "documents": sorted({str(c.document_id) for c in result.candidates}),
+        },
+        meta=meta,
+    )
+    db.commit()
     return SearchResponse(
         query=result.query,
         mode=options.mode,

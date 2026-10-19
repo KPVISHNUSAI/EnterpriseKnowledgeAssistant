@@ -8,18 +8,23 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
+import redis as redis_lib
 from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 
+from app.api import deps
 from app.core import rate_limit
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
+from app.core.errors import UnauthorizedError
 from app.core.redis import get_redis
 from app.core.security import hash_token, password_needs_rehash
 from app.db.base import utcnow
 from app.db.session import set_tenant
 from app.models import AuditEvent, Invitation, OrgRole, User, UserSession, WorkspaceRole
 from app.services import auth as auth_service
+from app.services.audit import RequestMeta
+from scripts import create_organization
 
 PASSWORD = "Correct-Horse-Battery-9"  # the factory's default password
 NEW_PASSWORD = "Another-Long-Passphrase-7"
@@ -257,6 +262,25 @@ def test_password_reentry_shares_the_per_account_limit(
     assert statuses == [403, 403, 429]
 
 
+def test_sign_in_refuses_while_the_limiter_is_down_but_other_limits_fail_open(
+    login_as, client, factory, tenant, monkeypatch, rate_limited
+):
+    """Without Redis the guessing limits cannot count, so sign-in waits (503) instead of
+    allowing unlimited attempts; everyday limits such as search stay open."""
+    session = login_as(tenant.viewer, tenant.org)
+    unreachable = redis_lib.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2)
+    monkeypatch.setattr(deps, "get_redis", lambda: unreachable)
+    monkeypatch.setattr(auth_service, "get_redis", lambda: unreachable)
+
+    response = client.post(LOGIN, json={"email": tenant.viewer.email, "password": PASSWORD})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "rate_limit_unavailable"
+    body = {"current_password": PASSWORD, "new_password": NEW_PASSWORD}
+    assert session.post("/api/v1/auth/me/password", json=body).status_code == 503
+    search = {"query": "vacation", "mode": "keyword", "rerank": False}
+    assert session.post("/api/v1/search", json=search).status_code == 200
+
+
 def test_public_registration_can_be_disabled(client, monkeypatch, tenant, db):
     monkeypatch.setattr(get_settings(), "allow_public_registration", False)
     response = _register(client)
@@ -266,6 +290,43 @@ def test_public_registration_can_be_disabled(client, monkeypatch, tenant, db):
     token = _invitation(db, tenant.org, "invited@example.com")
     response = _register(client, email="invited@example.com", invite_token=token)
     assert response.status_code == 201, response.text
+
+
+def test_sign_up_is_closed_by_default_and_the_first_admin_is_made_on_the_server(
+    client, monkeypatch, capsys
+):
+    assert Settings.model_fields["allow_public_registration"].default is False
+    monkeypatch.setattr(get_settings(), "allow_public_registration", False)
+    assert _register(client).status_code == 403
+
+    monkeypatch.setenv("ADMIN_PASSWORD", "Short-9")
+    with pytest.raises(SystemExit, match="characters long"):
+        create_organization.main(
+            ["--organization", "Acme", "--email", "a@acme.example", "--name", "A"]
+        )
+    monkeypatch.setenv("ADMIN_PASSWORD", STRONG_PASSWORD)
+    argv = ["--organization", "Acme", "--email", "Asha@Acme.example", "--name", "Asha Admin"]
+    assert create_organization.main(argv) == 0
+    assert STRONG_PASSWORD not in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="already exists"):
+        create_organization.main(argv)
+
+    response = client.post(LOGIN, json={"email": "asha@acme.example", "password": STRONG_PASSWORD})
+    assert response.status_code == 200, response.text
+    me = response.json()
+    assert (me["organization"]["name"], me["organization"]["role"]) == ("Acme", "org_admin")
+    assert [w["name"] for w in me["workspaces"]] == ["General"]
+
+
+def test_an_account_deactivated_mid_request_cannot_accept_an_invitation(
+    db, factory, tenant, other_tenant
+):
+    token = _invitation(db, other_tenant.org, tenant.viewer.email)
+    principal = factory.principal(tenant.viewer, tenant.org)  # resolved before the lockout
+    db.execute(update(User).where(User.id == tenant.viewer.id).values(is_active=False))
+    db.commit()
+    with pytest.raises(UnauthorizedError):
+        auth_service.accept_invitation(db, principal, token, meta=RequestMeta())
 
 
 def test_organization_name_is_required_without_invitation(client):
@@ -390,7 +451,7 @@ def test_existing_user_accepts_an_invitation_and_switches_to_it(login_as, tenant
 def test_me_lists_workspaces_and_capabilities_by_role(login_as, factory, tenant):
     factory.workspace(tenant.org, "Legal", members={tenant.admin: WorkspaceRole.VIEWER})
     expected = {
-        "admin": (True, True, True, True),
+        "admin": (True, True, True, False),  # a viewer of Legal: no role-based upload
         "manager": (True, False, False, True),
         "editor": (False, False, False, True),
         "viewer": (False, False, False, False),

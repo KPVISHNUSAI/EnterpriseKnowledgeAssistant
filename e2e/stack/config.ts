@@ -49,6 +49,7 @@ export function stackEnv(storagePath: string): NodeJS.ProcessEnv {
     ALLOWED_ORIGINS: FRONTEND_ORIGIN,
     COOKIE_SECURE: "false",
     RATE_LIMIT_ENABLED: "false",
+    ALLOW_PUBLIC_REGISTRATION: "true", // the tests sign up their own organizations
     DATABASE_URL: `postgresql+psycopg://eka_app:eka_app_dev_password@localhost:${postgresPort}/${DATABASE}`,
     MIGRATION_DATABASE_URL: `postgresql+psycopg://eka_owner:eka_owner_dev_password@localhost:${postgresPort}/${DATABASE}`,
     DB_APP_ROLE: "eka_app",

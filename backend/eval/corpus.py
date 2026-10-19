@@ -155,10 +155,10 @@ WORKSPACES_BY_KEY = {ws.key: ws for ws in WORKSPACES}
 
 
 def can_read(person: Person, doc: Doc) -> bool:
-    """The documented read rule: org admins read everything; otherwise a workspace-visible
-    document is readable by its workspace's members, and a restricted one only by people
-    with a user grant, its uploader (while a member) and the workspace owners."""
-    if person.org_role is OrgRole.ORG_ADMIN or person.key in doc.grants:
+    """The documented read rule, the same for org admins: a workspace-visible document is
+    readable by its workspace's members, and a restricted one only by people with a user
+    grant, its uploader (while a member) and the workspace owners."""
+    if person.key in doc.grants:
         return True
     role = person.workspaces.get(doc.workspace)
     if role is None:

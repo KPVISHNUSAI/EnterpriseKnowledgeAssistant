@@ -77,7 +77,7 @@ def main() -> int:
         print(f"\norganization: {corpus.ORG_NAME}")
         for person in corpus.PEOPLE:
             workspaces = ", ".join(f"{ws} ({role.value})" for ws, role in person.workspaces.items())
-            print(f"  {person.email:32} {person.org_role.value:18} {workspaces or 'all, as admin'}")
+            print(f"  {person.email:32} {person.org_role.value:18} {workspaces or 'none'}")
         ingestion = "ingested in this process" if args.inline else "queued for the ingestion worker"
         print(f"documents: {len(loaded.documents)} ({ingestion})")
         if shared is not None and any(line.startswith("user ") for line in loaded.created):

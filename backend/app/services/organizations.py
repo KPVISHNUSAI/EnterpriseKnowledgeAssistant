@@ -92,6 +92,7 @@ def _member_out(membership: OrganizationMembership, user: User) -> MemberOut:
         full_name=user.full_name,
         role=membership.role,
         joined_at=membership.created_at,
+        is_active=user.is_active,
     )
 
 
@@ -135,20 +136,39 @@ def _membership(db: Session, p: Principal, user_id: uuid.UUID) -> OrganizationMe
     return membership
 
 
-def _ensure_another_admin(db: Session, organization_id: uuid.UUID) -> None:
-    """409 unless another org admin remains. Locking the admin rows (in a fixed order)
-    serializes concurrent demotions, so two admins cannot remove each other."""
-    admins = db.scalars(
-        select(OrganizationMembership.id)
+def _ensure_another_admin(db: Session, organization_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """409 unless an active org admin other than `user_id` remains. Every change that can
+    take an admin away locks the organization row first, so they run one at a time and
+    each counts (in a new statement, hence a new snapshot) what the previous committed:
+    two admins cannot demote, remove or deactivate each other."""
+    db.execute(select(Organization.id).where(Organization.id == organization_id).with_for_update())
+    others = db.scalar(
+        select(func.count())
+        .select_from(OrganizationMembership)
+        .join(User, User.id == OrganizationMembership.user_id)
         .where(
             OrganizationMembership.organization_id == organization_id,
             OrganizationMembership.role == OrgRole.ORG_ADMIN,
+            OrganizationMembership.user_id != user_id,
+            User.is_active,
         )
-        .order_by(OrganizationMembership.id)
-        .with_for_update()
-    ).all()
-    if len(admins) < 2:
+    )
+    if not others:
         raise ConflictError("The organization needs at least one admin", code="last_admin")
+
+
+def _revoke_invitations_by(db: Session, organization_id: uuid.UUID, user_id: uuid.UUID) -> int:
+    """Pending invitations sent by someone who loses access: they must not outlive it."""
+    result = db.execute(
+        update(Invitation)
+        .where(
+            Invitation.organization_id == organization_id,
+            Invitation.invited_by == user_id,
+            *pending_invitations(),
+        )
+        .values(revoked_at=utcnow())
+    )
+    return int(result.rowcount)  # type: ignore[attr-defined]
 
 
 def update_member_role(
@@ -164,7 +184,7 @@ def update_member_role(
     previous = membership.role
     if body.role != previous:
         if previous == OrgRole.ORG_ADMIN:
-            _ensure_another_admin(db, principal.organization_id)
+            _ensure_another_admin(db, principal.organization_id, user_id)
         membership.role = body.role
         audit.record(
             db,
@@ -187,7 +207,7 @@ def remove_member(
     org_id = principal.organization_id
     membership = _membership(db, principal, user_id)
     if membership.role == OrgRole.ORG_ADMIN:
-        _ensure_another_admin(db, org_id)
+        _ensure_another_admin(db, org_id, user_id)
     # User grants reference the user id without a foreign key; drop them so a later
     # re-invitation starts without the old document access.
     db.execute(
@@ -200,6 +220,7 @@ def remove_member(
     # Composite foreign keys cascade workspace memberships and conversations.
     db.execute(delete(OrganizationMembership).where(OrganizationMembership.id == membership.id))
     revoke_user_sessions(db, user_id, active_organization_id=org_id)
+    revoked = _revoke_invitations_by(db, org_id, user_id)
     audit.record(
         db,
         AuditAction.ORG_MEMBER_REMOVED,
@@ -207,10 +228,57 @@ def remove_member(
         actor_user_id=principal.user_id,
         resource_type="user",
         resource_id=user_id,
-        metadata={"role": membership.role.value},
+        metadata={"role": membership.role.value, "invitations_revoked": revoked},
         meta=meta,
     )
     db.commit()
+
+
+def set_member_active(
+    db: Session, principal: Principal, user_id: uuid.UUID, active: bool, *, meta: RequestMeta
+) -> MemberOut:
+    """Deactivate (sign-in refused, sessions revoked) or reactivate a member's account,
+    keeping their memberships, grants and conversations. An account is shared by all its
+    organizations, so only one that is its sole organization may switch it."""
+    access.require(principal.is_org_admin)
+    membership = _membership(db, principal, user_id)
+    user = db.get_one(User, user_id, with_for_update=True)
+    if user.is_active == active:
+        return _member_out(membership, user)
+    if user_id == principal.user_id:
+        raise ConflictError("You cannot deactivate your own account", code="cannot_deactivate_self")
+    elsewhere = db.scalar(
+        select(func.count()).where(
+            OrganizationMembership.user_id == user_id,
+            OrganizationMembership.organization_id != principal.organization_id,
+        )
+    )
+    if elsewhere:
+        raise ConflictError(
+            "This account also belongs to another organization; remove the member instead",
+            code="member_of_other_organizations",
+        )
+    if not active and membership.role == OrgRole.ORG_ADMIN:
+        _ensure_another_admin(db, principal.organization_id, user_id)
+    user.is_active = active
+    metadata = {}
+    if not active:
+        revoke_user_sessions(db, user_id)
+        metadata["invitations_revoked"] = _revoke_invitations_by(
+            db, principal.organization_id, user_id
+        )
+    audit.record(
+        db,
+        AuditAction.ORG_MEMBER_DEACTIVATED if not active else AuditAction.ORG_MEMBER_REACTIVATED,
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        resource_type="user",
+        resource_id=user_id,
+        metadata=metadata,
+        meta=meta,
+    )
+    db.commit()
+    return _member_out(membership, user)
 
 
 def _invitation_out(invitation: Invitation, invited_by_email: str | None) -> InvitationOut:

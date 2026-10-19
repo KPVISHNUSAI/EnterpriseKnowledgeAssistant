@@ -55,8 +55,9 @@ from app.schemas.chat import (
     StreamSourcesEvent,
     StreamTokenEvent,
 )
-from app.services import access, usage
+from app.services import access, audit, usage
 from app.services.access import Principal
+from app.services.audit import AuditAction, RequestMeta
 from app.services.conversations import (
     HISTORY_DOCUMENTS,
     document_ids,
@@ -78,6 +79,7 @@ def chat(
     embedder: EmbeddingProvider,
     reranker: Reranker | None,
     llm: LLMProvider | None,
+    meta: RequestMeta,
 ) -> ChatResponse:
     settings = get_settings()
     question = normalize_query(body.message, max_chars=settings.max_query_chars)
@@ -113,6 +115,7 @@ def chat(
         result=result,
         message_id=assistant.id,
     )
+    _audit_answer(db, principal, assistant, history_documents, meta)
     db.commit()
     return ChatResponse(
         conversation_id=conversation.id,
@@ -129,6 +132,7 @@ def start_chat_stream(
     embedder: EmbeddingProvider,
     reranker: Reranker | None,
     llm: LLMProvider | None,
+    meta: RequestMeta,
 ) -> Callable[[threading.Event], Iterator[bytes]]:
     """Validate and persist the user turn synchronously (errors become HTTP statuses),
     then return the SSE producer. The producer runs in another thread with its own
@@ -143,7 +147,7 @@ def start_chat_stream(
     conversation.updated_at = utcnow()
     db.commit()
 
-    meta = StreamMetaEvent(
+    ids = StreamMetaEvent(
         conversation_id=conversation.id,
         user_message_id=user_message.id,
         assistant_message_id=placeholder.id,
@@ -155,7 +159,7 @@ def start_chat_stream(
         with session_scope(principal.organization_id) as session:
             state = _StreamState()
             try:
-                yield encode_event("meta", meta)
+                yield encode_event("meta", ids)
                 yield from _events(session, state, cancel)
             finally:
                 # Also runs when the bridge abandons this generator after the client
@@ -239,6 +243,8 @@ def start_chat_stream(
                     **({"error": {"code": state.error[0]}} if state.error else {}),
                     **_history_metadata(history_documents),
                 }
+            # Also for an abandoned answer: its sources event already reached the client.
+            _audit_answer(session, principal, message, history_documents, meta)
             session.commit()
             return message
         except Exception:
@@ -290,6 +296,33 @@ def fill_message(
         for passage in result.passages
     ]
     message.retrieval_metadata = answer_metadata(result) | _history_metadata(history_documents)
+
+
+def _audit_answer(
+    db: Session,
+    principal: Principal,
+    message: Message,
+    history_documents: set[uuid.UUID],
+    meta: RequestMeta,
+) -> None:
+    """Which documents an answer was built from: identifiers only, no text."""
+    sources = message.sources or []
+    audit.record(
+        db,
+        AuditAction.CHAT_ANSWERED,
+        organization_id=principal.organization_id,
+        actor_user_id=principal.user_id,
+        resource_type="message",
+        resource_id=message.id,
+        metadata={
+            "conversation_id": str(message.conversation_id),
+            "status": message.status.value,
+            "documents_retrieved": sorted({s["document_id"] for s in sources}),
+            "documents_cited": sorted({s["document_id"] for s in sources if s["cited"]}),
+            "documents_from_history": sorted(map(str, history_documents)),
+        },
+        meta=meta,
+    )
 
 
 def _history_metadata(documents: set[uuid.UUID]) -> dict[str, Any]:

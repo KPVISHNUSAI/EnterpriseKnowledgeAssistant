@@ -6,13 +6,15 @@ rendering) filters with `readable_documents_clause`, so a crafted ID or filter c
 never widen access. Row-level security in PostgreSQL is a second, independent layer
 that enforces tenant isolation even if application code forgets a filter.
 
-Read rule (non-admins): the document is in the caller's organization AND one of
+Read rule: the document is in the caller's organization AND one of
   * a workspace grant names a workspace the caller belongs to
     (a document's own workspace grant = "visible to the workspace"),
   * a user grant names the caller,
   * the caller uploaded it and still belongs to its workspace,
   * the caller owns its workspace.
-Organization admins can read every document in their organization.
+Organization admins get no exception: they manage people, workspaces and settings, not
+content. To read a workspace's documents an admin joins it, which the audit log records
+and its members can see.
 """
 
 from __future__ import annotations
@@ -67,7 +69,7 @@ def can_read_workspace(p: Principal, workspace_id: uuid.UUID) -> bool:
 
 
 def can_upload_to_workspace(p: Principal, workspace_id: uuid.UUID) -> bool:
-    return p.is_org_admin or p.workspace_roles.get(workspace_id) in (
+    return p.workspace_roles.get(workspace_id) in (
         WorkspaceRole.OWNER,
         WorkspaceRole.EDITOR,
     )
@@ -99,8 +101,6 @@ def _in(
 def readable_documents_clause(p: Principal) -> ColumnElement[bool]:
     """WHERE clause over `Document` selecting exactly the documents `p` may read."""
     in_org = Document.organization_id == p.organization_id
-    if p.is_org_admin:
-        return in_org
     ws_ids = p.workspace_ids
     granted = exists().where(
         DocumentPermission.document_id == Document.id,
@@ -129,8 +129,6 @@ def readable_documents_clause(p: Principal) -> ColumnElement[bool]:
 def manageable_documents_clause(p: Principal) -> ColumnElement[bool]:
     """WHERE clause over `Document` selecting the documents `p` may modify or delete."""
     in_org = Document.organization_id == p.organization_id
-    if p.is_org_admin:
-        return in_org
     manage_grant = exists().where(
         DocumentPermission.document_id == Document.id,
         DocumentPermission.organization_id == Document.organization_id,

@@ -58,6 +58,8 @@ export const api = {
     updateMemberRole: (userId: string, role: OrgRole) =>
       request<OrgMember>("PATCH", `/organization/members/${seg(userId)}`, { json: { role } }),
     removeMember: (userId: string) => request<void>("DELETE", `/organization/members/${seg(userId)}`),
+    setMemberActive: (userId: string, active: boolean) =>
+      request<OrgMember>("POST", `/organization/members/${seg(userId)}/${active ? "reactivate" : "deactivate"}`),
     invitations: (query: Paging) => request<Page<Invitation>>("GET", "/organization/invitations", { query }),
     createInvitation: (body: { email: string; role: OrgRole }) =>
       request<InvitationCreated>("POST", "/organization/invitations", { json: body }),

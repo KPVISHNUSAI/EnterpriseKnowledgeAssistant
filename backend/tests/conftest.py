@@ -67,6 +67,7 @@ os.environ.update(
         "RERANK_ENABLED": "false",
         "LLM_PROVIDER": "extractive",
         "RATE_LIMIT_ENABLED": "false",
+        "ALLOW_PUBLIC_REGISTRATION": "true",  # off by default; the sign-up tests need it
         "ARGON2_TIME_COST": "1",
         "ARGON2_MEMORY_KIB": "1024",
         "ARGON2_PARALLELISM": "1",

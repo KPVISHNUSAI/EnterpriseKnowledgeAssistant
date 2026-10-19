@@ -43,15 +43,17 @@ def test_counts_cover_only_readable_documents(login_as, factory, tenant, other_t
     assert viewer["workspaces_count"] == 1
     assert {doc["title"] for doc in viewer["recent_documents"]} == {"indexed", "failed"}
 
-    admin = login_as(tenant.admin, tenant.org).get(DASHBOARD).json()
-    assert admin["documents_total"] == 4
-    assert admin["documents_by_status"] == {
+    owner = login_as(tenant.manager, tenant.org).get(DASHBOARD).json()
+    assert owner["documents_total"] == 3
+    assert owner["documents_by_status"] == {
         "queued": 1,
-        "processing": 1,
+        "processing": 0,
         "indexed": 1,
         "failed": 1,
     }
-    assert admin["workspaces_count"] == 2  # admins see every workspace
+    admin = login_as(tenant.admin, tenant.org).get(DASHBOARD).json()
+    assert admin["documents_total"] == 0  # admins read no document by role alone
+    assert admin["workspaces_count"] == 2  # but see every workspace
 
     newcomer = factory.user()
     factory.member(tenant.org, newcomer)
@@ -102,7 +104,7 @@ def test_recent_conversations_are_the_callers_own(login_as, tenant, db):
     assert [c["message_count"] for c in recent] == [0, 2, 0, 0, 0]
 
 
-def test_activity_admins_see_the_organization_others_their_own(login_as, tenant, db):
+def test_activity_admins_see_the_organization_others_their_own(login_as, factory, tenant, db):
     secret = b"TOP SECRET merger terms"
     editor = login_as(tenant.editor, tenant.org)
     doc = uploaded(editor, tenant.workspace.id, filename="Merger.txt", data=secret)["document"]
@@ -115,12 +117,22 @@ def test_activity_admins_see_the_organization_others_their_own(login_as, tenant,
     ]
     assert (mine[0]["resource_type"], mine[0]["resource_id"]) == ("document", doc["id"])
 
-    activity = login_as(tenant.admin, tenant.org).get(DASHBOARD).json()["recent_activity"]
+    admin = login_as(tenant.admin, tenant.org)
+    activity = admin.get(DASHBOARD).json()["recent_activity"]
+    # Admins read no document by role, so they see what happened, not to which title.
     assert [(a["action"], a["summary"]) for a in activity] == [
-        ("document.downloaded", "Downloaded “Merger”"),
-        ("document.uploaded", "Uploaded “Merger”"),
+        ("document.downloaded", "Downloaded a document"),
+        ("document.uploaded", "Uploaded a document"),
     ]
-    assert "SECRET" not in str(activity)
+    events = admin.get("/api/v1/admin/audit-events").json()["items"]
+    assert [("title" in e["metadata"], e["resource_id"]) for e in events] == [
+        (False, doc["id"])
+    ] * 2
+    assert "SECRET" not in str(activity) and "Merger" not in str(events)
+
+    factory.workspace_member(tenant.workspace, tenant.admin, WorkspaceRole.VIEWER)
+    activity = admin.get(DASHBOARD).json()["recent_activity"]
+    assert [a["summary"] for a in activity] == ["Downloaded “Merger”", "Uploaded “Merger”"]
 
 
 def test_activity_is_limited_to_the_ten_newest(login_as, tenant, db):
@@ -139,7 +151,7 @@ def test_activity_is_limited_to_the_ten_newest(login_as, tenant, db):
     db.commit()
     activity = login_as(tenant.admin, tenant.org).get(DASHBOARD).json()["recent_activity"]
     assert len(activity) == 10
-    assert activity[0]["summary"] == "Updated “Title 11”"
+    assert (activity[0]["resource_id"], activity[0]["summary"]) == ("doc-11", "Updated a document")
 
 
 def test_summaries():

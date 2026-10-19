@@ -40,7 +40,7 @@ def test_listing_follows_membership(login_as, factory, tenant):
 @pytest.mark.parametrize(
     ("who", "my_role", "can_manage", "can_upload"),
     [
-        ("admin", None, True, True),
+        ("admin", None, True, False),  # manages the workspace, uploads only as a member
         ("manager", "owner", True, True),
         ("editor", "editor", False, True),
         ("viewer", "viewer", False, False),
@@ -152,7 +152,7 @@ def test_document_count_only_counts_readable_documents(login_as, factory, tenant
         grants={tenant.viewer: PermissionLevel.READ},
     )
     factory.document(tenant.workspace, uploaded_by=tenant.manager, restricted=True)
-    expected = {"admin": 4, "manager": 4, "editor": 2, "viewer": 2}
+    expected = {"admin": 0, "manager": 4, "editor": 2, "viewer": 2}
     for who, count in expected.items():
         session = login_as(getattr(tenant, who), tenant.org)
         assert session.get(f"{WORKSPACES}/{tenant.workspace.id}").json()["document_count"] == count

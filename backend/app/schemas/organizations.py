@@ -26,6 +26,7 @@ class MemberOut(Schema):
     full_name: str
     role: OrgRole
     joined_at: datetime
+    is_active: bool = Field(description="False once deactivated: cannot sign in")
 
 
 class UpdateMemberRoleRequest(BaseModel):

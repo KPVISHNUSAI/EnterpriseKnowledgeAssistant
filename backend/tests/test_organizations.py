@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.core.security import hash_token
 from app.db.base import utcnow
@@ -18,12 +19,15 @@ from app.models import (
     Invitation,
     Message,
     MessageRole,
+    Organization,
     OrgRole,
     PermissionLevel,
+    User,
     WorkspaceMembership,
 )
 
 MEMBERS = "/api/v1/organization/members"
+PASSWORD = "Correct-Horse-Battery-9"  # the factory's default password
 INVITATIONS = "/api/v1/organization/invitations"
 
 
@@ -177,8 +181,111 @@ def test_removing_a_member_revokes_access_in_that_organization_only(
     assert user.email not in [m["email"] for m in members["items"]]
     events = _events(db, tenant.org.id, "organization.member_removed")
     assert [(e.resource_id, e.event_metadata) for e in events] == [
-        (str(user.id), {"role": "employee"})
+        (str(user.id), {"role": "employee", "invitations_revoked": 0})
     ]
+
+
+def test_deactivation_locks_a_member_out_and_keeps_their_records(
+    client, login_as, factory, tenant, other_tenant, db
+):
+    user = tenant.editor
+    set_tenant(db, tenant.org.id)
+    db.add(Conversation(organization_id=tenant.org.id, user_id=user.id, title="Q3"))
+    db.commit()
+    signed_in = login_as(user, tenant.org)
+    admin = login_as(tenant.admin, tenant.org)
+    assert (
+        login_as(tenant.manager, tenant.org).post(f"{MEMBERS}/{user.id}/deactivate").status_code
+        == 403
+    )
+
+    response = admin.post(f"{MEMBERS}/{user.id}/deactivate")
+    assert response.status_code == 200, response.text
+    assert response.json()["is_active"] is False
+    assert signed_in.get("/api/v1/auth/me").status_code == 401
+    sign_in = {"email": user.email, "password": PASSWORD}
+    assert client.post("/api/v1/auth/login", json=sign_in).status_code == 401
+    directory = {m["email"]: m["is_active"] for m in admin.get(MEMBERS).json()["items"]}
+    assert directory[user.email] is False and directory[tenant.viewer.email] is True
+    set_tenant(db, tenant.org.id)
+    assert _count(db, Conversation, Conversation.user_id == user.id) == 1
+    assert _count(db, WorkspaceMembership, WorkspaceMembership.user_id == user.id) == 1
+
+    assert admin.post(f"{MEMBERS}/{user.id}/reactivate").json()["is_active"] is True
+    assert client.post("/api/v1/auth/login", json=sign_in).status_code == 200
+    actions = ["organization.member_deactivated", "organization.member_reactivated"]
+    assert [[e.resource_id for e in _events(db, tenant.org.id, a)] for a in actions] == [
+        [str(user.id)],
+        [str(user.id)],
+    ]
+
+    response = admin.post(f"{MEMBERS}/{tenant.admin.id}/deactivate")
+    assert response.json()["error"]["code"] == "cannot_deactivate_self"
+    factory.member(other_tenant.org, tenant.viewer)
+    response = admin.post(f"{MEMBERS}/{tenant.viewer.id}/deactivate")
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "member_of_other_organizations"
+
+
+def test_a_deactivated_admin_does_not_count_as_another_admin(login_as, tenant):
+    admin = login_as(tenant.admin, tenant.org)
+    assert (
+        admin.patch(f"{MEMBERS}/{tenant.manager.id}", json={"role": "org_admin"}).status_code == 200
+    )
+    assert admin.post(f"{MEMBERS}/{tenant.manager.id}/deactivate").status_code == 200
+    response = admin.patch(f"{MEMBERS}/{tenant.admin.id}", json={"role": "employee"})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "last_admin"
+    assert admin.delete(f"{MEMBERS}/{tenant.admin.id}").status_code == 409
+    # The deactivated admin is not the one keeping the organization administered.
+    assert (
+        admin.patch(f"{MEMBERS}/{tenant.manager.id}", json={"role": "employee"}).status_code == 200
+    )
+
+
+def test_two_admins_cannot_deactivate_each_other_at_once(login_as, tenant, db):
+    """Simulates the first deactivation midway (organization locked, its user row changed)
+    while the second runs: the second must wait, then see the first and refuse."""
+    admin = login_as(tenant.admin, tenant.org)
+    assert (
+        admin.patch(f"{MEMBERS}/{tenant.manager.id}", json={"role": "org_admin"}).status_code == 200
+    )
+    second = login_as(tenant.manager, tenant.org)
+    db.execute(select(Organization).where(Organization.id == tenant.org.id).with_for_update())
+    db.execute(update(User).where(User.id == tenant.manager.id).values(is_active=False))
+    responses = []
+    racing = threading.Thread(
+        target=lambda: responses.append(second.post(f"{MEMBERS}/{tenant.admin.id}/deactivate"))
+    )
+    racing.start()
+    racing.join(timeout=0.5)
+    assert racing.is_alive()  # waiting for the first to finish
+    db.commit()
+    racing.join()
+    # The manager's own session is gone, or the deactivation is refused: either way the
+    # organization keeps an active admin.
+    assert responses[0].status_code in (401, 409)
+    assert db.get(User, tenant.admin.id, populate_existing=True).is_active
+
+
+def test_deactivation_and_removal_revoke_the_invitations_a_person_sent(login_as, tenant):
+    admin = login_as(tenant.admin, tenant.org)
+    assert (
+        admin.patch(f"{MEMBERS}/{tenant.manager.id}", json={"role": "org_admin"}).status_code == 200
+    )
+    manager = login_as(tenant.manager, tenant.org)
+    sent = manager.post(INVITATIONS, json={"email": "second@personal.example", "role": "org_admin"})
+    assert sent.status_code == 201
+    token = sent.json()["token"]
+    assert admin.get(f"/api/v1/auth/invitations/{token}").status_code == 200
+    assert admin.post(f"{MEMBERS}/{tenant.manager.id}/deactivate").status_code == 200
+    assert admin.get(f"/api/v1/auth/invitations/{token}").status_code == 404
+
+    assert admin.post(f"{MEMBERS}/{tenant.manager.id}/reactivate").status_code == 200
+    manager = login_as(tenant.manager, tenant.org)
+    sent = manager.post(INVITATIONS, json={"email": "third@personal.example", "role": "employee"})
+    assert admin.delete(f"{MEMBERS}/{tenant.manager.id}").status_code == 204
+    assert admin.get(f"/api/v1/auth/invitations/{sent.json()['token']}").status_code == 404
 
 
 def test_invitations_are_created_listed_and_revoked_by_admins(client, login_as, tenant, db):

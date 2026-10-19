@@ -1,7 +1,8 @@
 """Fixed-window rate limiting backed by Redis.
 
-Fails open when Redis is unreachable (logged), so a cache outage degrades protection
-rather than taking the API down.
+When Redis is unreachable (logged), limits on ordinary work fail open, so a cache outage
+degrades protection rather than taking the API down. Limits that stop password guessing
+fail closed: without them an outage would allow unlimited guesses.
 """
 
 from __future__ import annotations
@@ -11,13 +12,19 @@ import time
 
 import redis
 
-from app.core.errors import RateLimitedError
+from app.core.errors import RateLimitedError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
 
 def hit(
-    client: redis.Redis, bucket: str, identity: str, *, limit: int, window_seconds: int
+    client: redis.Redis,
+    bucket: str,
+    identity: str,
+    *,
+    limit: int,
+    window_seconds: int,
+    fail_closed: bool = False,
 ) -> None:
     """Count one request; raise RateLimitedError once `limit` is exceeded in the window."""
     window = int(time.time() // window_seconds)
@@ -29,6 +36,11 @@ def hit(
         count = int(pipe.execute()[0])
     except redis.RedisError:
         logger.warning("rate_limit.redis_unavailable", extra={"bucket": bucket})
+        if fail_closed:
+            raise ServiceUnavailableError(
+                "Temporarily unavailable, please try again shortly",
+                code="rate_limit_unavailable",
+            ) from None
         return
     if count > limit:
         retry_after = window_seconds - int(time.time() % window_seconds)

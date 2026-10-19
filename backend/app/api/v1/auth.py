@@ -29,8 +29,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/register",
     response_model=MeResponse,
     status_code=201,
-    responses=errors(403, 409, 422, 429),
-    dependencies=[rate_limit_ip("register", "rate_limit_register_per_hour", 3600)],
+    responses=errors(403, 409, 422, 429, 503),
+    dependencies=[
+        rate_limit_ip("register", "rate_limit_register_per_hour", 3600, fail_closed=True)
+    ],
 )
 def register(
     body: RegisterRequest,
@@ -42,7 +44,8 @@ def register(
 
     With `invite_token` the user joins the inviting organization with the invited role
     (the email must match the invitation). Without it a new organization is created with
-    the caller as organization admin; this requires ALLOW_PUBLIC_REGISTRATION=true.
+    the caller as organization admin; this requires ALLOW_PUBLIC_REGISTRATION=true (off by
+    default: then scripts/create_organization.py makes the first organization).
     Sets the HttpOnly session cookie and the CSRF cookie.
     """
     me, token = auth_service.register(db, body, meta=meta)
@@ -53,8 +56,8 @@ def register(
 @router.post(
     "/login",
     response_model=MeResponse,
-    responses=errors(401, 422, 429),
-    dependencies=[rate_limit_ip("login", "rate_limit_login_per_minute")],
+    responses=errors(401, 422, 429, 503),
+    dependencies=[rate_limit_ip("login", "rate_limit_login_per_minute", fail_closed=True)],
 )
 def login(
     body: LoginRequest,
@@ -106,7 +109,7 @@ def update_profile(
     return auth_service.update_profile(db, principal, body, meta=meta)
 
 
-@router.post("/me/password", status_code=204, responses=errors(401, 403, 422, 429))
+@router.post("/me/password", status_code=204, responses=errors(401, 403, 422, 429, 503))
 def change_password(
     body: ChangePasswordRequest,
     principal: Principal = Depends(get_principal),
@@ -131,8 +134,10 @@ def switch_organization(
 @router.get(
     "/invitations/{token}",
     response_model=InvitationPreview,
-    responses=errors(404, 429),
-    dependencies=[rate_limit_ip("invitation_preview", "rate_limit_login_per_minute")],
+    responses=errors(404, 429, 503),
+    dependencies=[
+        rate_limit_ip("invitation_preview", "rate_limit_login_per_minute", fail_closed=True)
+    ],
 )
 def preview_invitation(
     token: str = Path(min_length=1, max_length=200), db: Session = Depends(get_db)

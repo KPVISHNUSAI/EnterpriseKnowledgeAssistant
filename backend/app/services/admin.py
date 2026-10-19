@@ -33,7 +33,7 @@ from app.schemas.admin import (
     UsageTotals,
 )
 from app.schemas.common import Page, PageParams
-from app.services import access
+from app.services import access, audit
 from app.services.access import Principal
 
 
@@ -85,7 +85,8 @@ def list_audit_events(
         .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
         .offset(page.offset)
         .limit(page.page_size)
-    )
+    ).all()
+    metadata = audit.visible_metadata(db, principal, [event for event, _ in rows])
     items = [
         AuditEventOut(
             id=event.id,
@@ -94,12 +95,12 @@ def list_audit_events(
             actor_email=email,
             resource_type=event.resource_type,
             resource_id=event.resource_id,
-            metadata=event.event_metadata,
+            metadata=shown,
             ip_address=event.ip_address,
             request_id=event.request_id,
             created_at=event.created_at,
         )
-        for event, email in rows
+        for (event, email), shown in zip(rows, metadata, strict=True)
     ]
     return Page(items=items, total=total or 0, page=page.page, page_size=page.page_size)
 

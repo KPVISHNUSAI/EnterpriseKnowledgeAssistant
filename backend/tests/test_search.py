@@ -159,7 +159,9 @@ def test_unreadable_documents_are_not_searchable(client, factory, tenant, other_
     factory.authenticate(client, tenant.viewer, tenant.org)
     assert titles(client) == set()
     assert titles(client, document_ids=[str(secret.id), str(foreign.id)]) == set()
-    factory.authenticate(client, tenant.admin, tenant.org)
+    factory.authenticate(client, tenant.admin, tenant.org)  # admins read nothing by role
+    assert titles(client, document_ids=[str(secret.id), str(foreign.id)]) == set()
+    factory.authenticate(client, tenant.manager, tenant.org)  # the workspace owner
     assert titles(client, document_ids=[str(secret.id), str(foreign.id)]) == {"secret"}
 
 

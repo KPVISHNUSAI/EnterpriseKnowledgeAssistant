@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     session_idle_timeout_minutes: int = 120
     cookie_secure: bool = False
     cookie_domain: str | None = None
-    allow_public_registration: bool = True
+    allow_public_registration: bool = False
     invitation_ttl_hours: int = 168
     password_min_length: int = 12
     argon2_time_cost: int = 3

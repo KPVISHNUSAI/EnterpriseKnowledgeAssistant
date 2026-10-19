@@ -147,11 +147,20 @@ def require_roles(*roles: OrgRole) -> Callable[..., Principal]:
 require_org_admin = require_roles(OrgRole.ORG_ADMIN)
 
 
-def _hit(bucket: str, identity: str, setting: str, window_seconds: int) -> None:
+def _hit(
+    bucket: str, identity: str, setting: str, window_seconds: int, *, fail_closed: bool = False
+) -> None:
     settings = get_settings()
     if settings.rate_limit_enabled:
         limit = int(getattr(settings, setting))
-        hit(get_redis(), bucket, identity, limit=limit, window_seconds=window_seconds)
+        hit(
+            get_redis(),
+            bucket,
+            identity,
+            limit=limit,
+            window_seconds=window_seconds,
+            fail_closed=fail_closed,
+        )
 
 
 def rate_limit_user(bucket: str, setting: str, window_seconds: int = 60) -> Any:
@@ -163,10 +172,19 @@ def rate_limit_user(bucket: str, setting: str, window_seconds: int = 60) -> Any:
     return Depends(dependency)
 
 
-def rate_limit_ip(bucket: str, setting: str, window_seconds: int = 60) -> Any:
-    """Route dependency for unauthenticated endpoints, keyed by client IP."""
+def rate_limit_ip(
+    bucket: str, setting: str, window_seconds: int = 60, *, fail_closed: bool = False
+) -> Any:
+    """Route dependency for unauthenticated endpoints, keyed by client IP. `fail_closed`
+    refuses requests (503) while Redis is down: for limits that stop password guessing."""
 
     def dependency(request: Request) -> None:
-        _hit(bucket, client_ip(request) or "unknown", setting, window_seconds)
+        _hit(
+            bucket,
+            client_ip(request) or "unknown",
+            setting,
+            window_seconds,
+            fail_closed=fail_closed,
+        )
 
     return Depends(dependency)

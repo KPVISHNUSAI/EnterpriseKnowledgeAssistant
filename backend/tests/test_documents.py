@@ -275,8 +275,8 @@ def test_upload_requires_upload_rights_in_the_workspace(client, login_as, tenant
     assert upload(login_as(tenant.viewer, tenant.org), ws).status_code == 403
     assert upload(login_as(tenant.outsider, tenant.org), ws).status_code == 404
     assert upload(login_as(other_tenant.admin, other_tenant.org), ws).status_code == 404
-    admin = login_as(tenant.admin, tenant.org)  # not a workspace member, still allowed
-    assert upload(admin, ws, data=b"by admin").status_code == 201
+    admin = login_as(tenant.admin, tenant.org)  # not a workspace member: no upload by role
+    assert upload(admin, ws, data=b"by admin").status_code == 403
     assert upload(admin, uuid.uuid4(), data=b"nowhere").status_code == 404
     assert upload(login_as(tenant.manager, tenant.org), ws, data=b"by owner").status_code == 201
 
@@ -384,14 +384,15 @@ def test_list_reports_visibility_and_manage_flags(login_as, factory, tenant, oth
     assert set(viewer_view) == {"managers-shared"}
     assert viewer_view["managers-shared"]["can_manage"] is False
 
-    admin_view = listed(tenant.admin)
-    assert set(admin_view) == {
+    owner_view = listed(tenant.manager)
+    assert set(owner_view) == {
         "own-restricted",
         "managers-shared",
         "managers-private",
         "granted-manage",
     }
-    assert all(item["can_manage"] for item in admin_view.values())
+    assert all(item["can_manage"] for item in owner_view.values())
+    assert listed(tenant.admin) == {}
     assert listed(tenant.outsider) == {}
 
 
@@ -540,7 +541,7 @@ MANAGE_ENDPOINTS = [
 @pytest.mark.parametrize(
     ("actor", "uploader", "can_read", "can_manage"),
     [
-        ("admin", "editor", True, True),
+        ("admin", "editor", False, False),  # admins manage people, not content
         ("manager", "editor", True, True),  # workspace owner manages every document
         ("editor", "editor", True, True),  # editors manage their own uploads...
         ("editor", "manager", True, False),  # ...but not other people's

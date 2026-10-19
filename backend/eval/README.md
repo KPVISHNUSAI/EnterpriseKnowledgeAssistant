@@ -165,8 +165,8 @@ v1 has 85 cases:
 | `technical` | 9 | API reference, runbook, firmware notes |
 | `similar_pair` | 12 | Six pairs with near-identical questions and different answers (2025 vs 2026 policy, UK vs US) |
 | `unanswerable` | 8 | Nothing in the corpus answers the question |
-| `permission` | 8 | The answer exists only in the restricted document (or outside the asker's workspaces); attempts to bypass access |
-| `permission_control` | 3 | The same restricted facts asked by users who may read them |
+| `permission` | 9 | The answer exists only in the restricted document (or outside the asker's workspaces, or the asker is an org admin, who reads no document by role); attempts to bypass access |
+| `permission_control` | 2 | The same restricted facts asked by users who may read them |
 | `injection` | 7 | Retrieved text carries instructions aimed at the model |
 | `follow_up` | 7 | Elliptical follow-ups that need the history |
 

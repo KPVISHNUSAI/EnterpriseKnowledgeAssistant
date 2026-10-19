@@ -14,7 +14,7 @@ from app.schemas.dashboard import ActivityItem, DashboardResponse
 from app.schemas.documents import DocumentSort, SortOrder
 from app.services import documents
 from app.services.access import Principal, readable_documents_clause
-from app.services.audit import AuditAction
+from app.services.audit import AuditAction, visible_metadata
 
 _RECENT_DOCUMENTS = 5
 _RECENT_CONVERSATIONS = 5
@@ -144,7 +144,8 @@ def _recent_activity(db: Session, principal: Principal) -> list[ActivityItem]:
     )
     if not principal.is_org_admin:
         stmt = stmt.where(AuditEvent.actor_user_id == principal.user_id)
-    rows = db.execute(stmt.order_by(AuditEvent.created_at.desc()).limit(_RECENT_ACTIVITY))
+    rows = db.execute(stmt.order_by(AuditEvent.created_at.desc()).limit(_RECENT_ACTIVITY)).all()
+    metadata = visible_metadata(db, principal, [event for event, _ in rows])
     return [
         ActivityItem(
             id=event.id,
@@ -152,8 +153,8 @@ def _recent_activity(db: Session, principal: Principal) -> list[ActivityItem]:
             actor_email=email,
             resource_type=event.resource_type,
             resource_id=event.resource_id,
-            summary=summarize(event.action, event.event_metadata or {}),
+            summary=summarize(event.action, shown),
             created_at=event.created_at,
         )
-        for event, email in rows
+        for (event, email), shown in zip(rows, metadata, strict=True)
     ]

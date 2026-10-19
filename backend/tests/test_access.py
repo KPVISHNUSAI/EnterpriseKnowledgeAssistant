@@ -54,9 +54,11 @@ def docs(factory, tenant):
 ALL = {"shared", "editor-private", "granted-to-viewer", "viewer-can-manage", "legal-only"}
 
 
-def test_org_admin_reads_everything_in_org(db, factory, docs, other_tenant):
-    factory.document(other_tenant.workspace, uploaded_by=other_tenant.editor, title="globex")
-    assert _readable(db, factory.principal(docs.admin, docs.org)) == ALL
+def test_org_admin_reads_no_document_by_role_alone(db, factory, docs):
+    # Admins manage people and workspaces, not content: like anyone else they read
+    # through workspace membership and grants (joining a workspace is audited).
+    assert _readable(db, factory.principal(docs.admin, docs.org)) == set()
+    assert _manageable(db, factory.principal(docs.admin, docs.org)) == set()
 
 
 def test_workspace_owner_reads_all_workspace_documents(db, factory, docs):
@@ -88,7 +90,6 @@ def test_uploader_loses_access_after_leaving_workspace(db, factory, tenant):
 
 
 def test_manage_rules(db, factory, docs):
-    assert _manageable(db, factory.principal(docs.admin, docs.org)) == ALL
     assert _manageable(db, factory.principal(docs.manager, docs.org)) == ALL - {"legal-only"}
     assert _manageable(db, factory.principal(docs.editor, docs.org)) == {
         "shared",

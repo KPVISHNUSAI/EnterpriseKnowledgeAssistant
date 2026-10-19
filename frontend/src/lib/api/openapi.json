@@ -66,7 +66,7 @@
           "auth"
         ],
         "summary": "Register",
-        "description": "Create an account and sign in.\n\nWith `invite_token` the user joins the inviting organization with the invited role\n(the email must match the invitation). Without it a new organization is created with\nthe caller as organization admin; this requires ALLOW_PUBLIC_REGISTRATION=true.\nSets the HttpOnly session cookie and the CSRF cookie.",
+        "description": "Create an account and sign in.\n\nWith `invite_token` the user joins the inviting organization with the invited role\n(the email must match the invitation). Without it a new organization is created with\nthe caller as organization admin; this requires ALLOW_PUBLIC_REGISTRATION=true (off by\ndefault: then scripts/create_organization.py makes the first organization).\nSets the HttpOnly session cookie and the CSRF cookie.",
         "operationId": "register_api_v1_auth_register_post",
         "requestBody": {
           "content": {
@@ -121,6 +121,16 @@
           },
           "429": {
             "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -183,6 +193,16 @@
           },
           "429": {
             "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -361,6 +381,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -481,6 +511,16 @@
           },
           "429": {
             "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -878,6 +918,174 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (missing permission or CSRF token)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (or not visible to the caller)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization/members/{user_id}/deactivate": {
+      "post": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Deactivate Member",
+        "description": "Lock a member out at once: sign-in is refused and their sessions end. Their\nworkspaces, grants and conversations are kept (unlike removal), so an investigation\ncan still read the audit trail and the account can be reactivated. 409 for your own\naccount, the last active org admin, or an account that is also in another organization.",
+        "operationId": "deactivate_member_api_v1_organization_members__user_id__deactivate_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (missing permission or CSRF token)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (or not visible to the caller)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization/members/{user_id}/reactivate": {
+      "post": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Reactivate Member",
+        "description": "Let a deactivated member sign in again.",
+        "operationId": "reactivate_member_api_v1_organization_members__user_id__reactivate_post",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            }
           },
           "401": {
             "description": "Not authenticated",
@@ -5339,6 +5547,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Joined At"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "False once deactivated: cannot sign in"
           }
         },
         "type": "object",
@@ -5347,7 +5560,8 @@
           "email",
           "full_name",
           "role",
-          "joined_at"
+          "joined_at",
+          "is_active"
         ],
         "title": "MemberOut"
       },

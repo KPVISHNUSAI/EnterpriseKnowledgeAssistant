@@ -76,6 +76,35 @@ def remove_member(
     org_service.remove_member(db, principal, user_id, meta=meta)
 
 
+@router.post(
+    "/members/{user_id}/deactivate", response_model=MemberOut, responses=errors(401, 403, 404, 409)
+)
+def deactivate_member(
+    user_id: uuid.UUID,
+    principal: Principal = Depends(require_org_admin),
+    db: Session = Depends(get_db),
+    meta: RequestMeta = Depends(get_request_meta),
+) -> MemberOut:
+    """Lock a member out at once: sign-in is refused and their sessions end. Their
+    workspaces, grants and conversations are kept (unlike removal), so an investigation
+    can still read the audit trail and the account can be reactivated. 409 for your own
+    account, the last active org admin, or an account that is also in another organization."""
+    return org_service.set_member_active(db, principal, user_id, False, meta=meta)
+
+
+@router.post(
+    "/members/{user_id}/reactivate", response_model=MemberOut, responses=errors(401, 403, 404, 409)
+)
+def reactivate_member(
+    user_id: uuid.UUID,
+    principal: Principal = Depends(require_org_admin),
+    db: Session = Depends(get_db),
+    meta: RequestMeta = Depends(get_request_meta),
+) -> MemberOut:
+    """Let a deactivated member sign in again."""
+    return org_service.set_member_active(db, principal, user_id, True, meta=meta)
+
+
 @router.get("/invitations", response_model=Page[InvitationOut], responses=errors(401, 403))
 def list_invitations(
     page: PageParams = Depends(),

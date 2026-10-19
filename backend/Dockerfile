@@ -49,6 +49,7 @@ WORKDIR /app
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY scripts/create_organization.py ./scripts/
 
 USER app
 EXPOSE 8081

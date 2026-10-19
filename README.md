@@ -134,8 +134,18 @@ make up-app        # builds the images, runs migrations, starts api, worker, bea
 ```
 
 Open <http://localhost:3000> and register: the first user of a new organization becomes
-its administrator and gets a default workspace. The API listens on
-<http://localhost:8081>, with interactive documentation at <http://localhost:8081/api/docs>.
+its administrator and gets a default workspace. Sign-up is open because `.env.example`
+sets `ALLOW_PUBLIC_REGISTRATION=true`; unset, it is off and only invitations add users.
+Then the server creates the first organization and its administrator (the password is
+asked for, or read from `ADMIN_PASSWORD`):
+
+```bash
+docker compose run --rm api python scripts/create_organization.py \
+  --organization "Acme Ltd" --email admin@acme.example --name "Asha Admin"
+# or, without containers: cd backend && uv run python scripts/create_organization.py ...
+```
+
+The API listens on <http://localhost:8081>, with interactive documentation at <http://localhost:8081/api/docs>.
 
 On the first start the API and the worker download the embedding model
 (`BAAI/bge-small-en-v1.5`) and the reranker (`cross-encoder/ms-marco-MiniLM-L6-v2`) into

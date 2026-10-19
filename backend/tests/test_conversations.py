@@ -212,7 +212,10 @@ def test_delete_removes_messages_and_is_audited(login_as, tenant, handbook, fake
     assert remaining == 0
     assert db.scalar(select(func.count()).select_from(Message)) == 2  # the kept conversation
     events = db.execute(
-        text("SELECT action, resource_type, resource_id, actor_user_id FROM audit_events")
+        text(
+            "SELECT action, resource_type, resource_id, actor_user_id FROM audit_events"
+            " WHERE action LIKE 'conversation.%'"
+        )
     ).all()
     assert [tuple(e) for e in events] == [
         ("conversation.deleted", "conversation", conversation_id, tenant.viewer.id)

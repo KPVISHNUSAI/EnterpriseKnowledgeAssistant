@@ -60,7 +60,12 @@ class FakeReranker:
 @pytest.fixture
 def corpus(factory, tenant, other_tenant):
     t = tenant
-    legal_ws = factory.workspace(t.org, "Legal", members={t.outsider: WorkspaceRole.OWNER})
+    reader = factory.user("reader@acme.example.com")  # owns both workspaces: reads them all
+    factory.member(t.org, reader)
+    factory.workspace_member(t.workspace, reader, WorkspaceRole.OWNER)
+    legal_ws = factory.workspace(
+        t.org, "Legal", members={t.outsider: WorkspaceRole.OWNER, reader: WorkspaceRole.OWNER}
+    )
     docs = {
         "shared": factory.document(t.workspace, uploaded_by=t.editor, title="shared"),
         "restricted": factory.document(
@@ -86,7 +91,7 @@ def corpus(factory, tenant, other_tenant):
                 f"{name} remote work policy and laptop security.",
             ],
         )
-    return SimpleNamespace(t=t, legal_ws=legal_ws, other=other_tenant, **docs)
+    return SimpleNamespace(t=t, reader=reader, legal_ws=legal_ws, other=other_tenant, **docs)
 
 
 # --- Permission filtering ----------------------------------------------------------------
@@ -99,7 +104,8 @@ def test_results_only_come_from_readable_documents(db, factory, corpus, mode):
         t.viewer: {"shared", "granted"},
         t.editor: {"shared", "restricted"},  # uploader of the restricted document
         t.manager: {"shared", "restricted", "granted"},  # workspace owner
-        t.admin: {"shared", "restricted", "granted", "legal"},
+        t.admin: set(),  # org admins read through membership and grants only
+        corpus.reader: {"shared", "restricted", "granted", "legal"},
         t.outsider: {"legal"},
     }
     for user, titles in expected.items():
@@ -123,22 +129,22 @@ def test_filters_naming_unreadable_documents_match_nothing(db, factory, corpus, 
 
 @pytest.mark.parametrize("mode", MODES)
 def test_other_tenants_chunks_are_never_returned(db, factory, corpus, mode):
-    admin = factory.principal(corpus.t.admin, corpus.t.org)
-    assert "globex" not in found(db, admin, mode=mode)
+    reader = factory.principal(corpus.reader, corpus.t.org)
+    assert "globex" not in found(db, reader, mode=mode)
     crafted = {"document_ids": (corpus.globex.id,), "workspace_ids": (corpus.other.workspace.id,)}
-    assert found(db, admin, mode=mode, **crafted) == set()
-    other_admin = factory.principal(corpus.other.admin, corpus.other.org)
-    assert found(db, other_admin, mode=mode) == {"globex"}
+    assert found(db, reader, mode=mode, **crafted) == set()
+    other_owner = factory.principal(corpus.other.manager, corpus.other.org)
+    assert found(db, other_owner, mode=mode) == {"globex"}
 
 
 def test_explicit_access_check_still_applies_when_the_session_tenant_is_wrong(db, factory, corpus):
     """RLS and the access predicate are independent: with the session bound to tenant B,
     RLS hides tenant A's rows and the predicate hides tenant B's rows."""
-    admin = factory.principal(corpus.t.admin, corpus.t.org)
+    reader = factory.principal(corpus.reader, corpus.t.org)
     set_tenant(db, corpus.other.org.id)
     result = retrieve(
         db,
-        SearchScope(principal=admin),
+        SearchScope(principal=reader),
         "vacation policy",
         options=options(),
         embedder=EMBEDDER,
@@ -244,15 +250,15 @@ def test_modes_fill_their_own_evidence(db, factory, corpus):
 
 
 def test_per_method_fused_and_final_limits(db, factory, corpus):
-    admin = factory.principal(corpus.t.admin, corpus.t.org)  # 8 readable chunks
-    result = run(db, admin, opts=options(vector_top_k=3, keyword_top_k=3))
+    reader = factory.principal(corpus.reader, corpus.t.org)  # 8 readable chunks
+    result = run(db, reader, opts=options(vector_top_k=3, keyword_top_k=3))
     assert sum(c.vector_rank is not None for c in result.candidates) == 3
     assert sum(c.keyword_rank is not None for c in result.candidates) == 3
     assert result.total_candidates <= 6
 
-    result = run(db, admin, opts=options(fused_top_k=5, final_top_k=50))
+    result = run(db, reader, opts=options(fused_top_k=5, final_top_k=50))
     assert (result.total_candidates, len(result.candidates)) == (8, 5)
-    result = run(db, admin, opts=options(fused_top_k=5, final_top_k=2))
+    result = run(db, reader, opts=options(fused_top_k=5, final_top_k=2))
     assert (result.total_candidates, len(result.candidates)) == (8, 2)
 
 
@@ -327,9 +333,9 @@ def test_embedding_failure_is_service_unavailable(db, factory, corpus):
 
 
 def test_rerank_orders_by_score_and_applies_min_score(db, factory, corpus):
-    admin = factory.principal(corpus.t.admin, corpus.t.org)
+    reader = factory.principal(corpus.reader, corpus.t.org)
     reranker = FakeReranker({"legal remote": 0.9, "The granted vacation": 0.7, "shared": 0.2})
-    result = run(db, admin, opts=options(rerank=True), reranker=reranker)
+    result = run(db, reader, opts=options(rerank=True), reranker=reranker)
     assert result.reranked and "rerank" in result.timings_ms
     assert [c.content for c in result.candidates[:2]] == [
         "legal remote work policy and laptop security.",
@@ -339,16 +345,16 @@ def test_rerank_orders_by_score_and_applies_min_score(db, factory, corpus):
     assert scores == sorted(scores, reverse=True) and len(scores) == 8
     assert len(reranker.calls[0][1]) == 8  # every fused candidate was scored
 
-    result = run(db, admin, opts=options(rerank=True, min_rerank_score=0.5), reranker=reranker)
+    result = run(db, reader, opts=options(rerank=True, min_rerank_score=0.5), reranker=reranker)
     assert [c.rerank_score for c in result.candidates] == [0.9, 0.7]
     assert result.total_candidates == 8  # found before the threshold
 
 
 def test_reranker_sees_only_fused_top_k_and_final_top_k_is_kept(db, factory, corpus):
-    admin = factory.principal(corpus.t.admin, corpus.t.org)
+    reader = factory.principal(corpus.reader, corpus.t.org)
     reranker = FakeReranker({"legal": 0.9})
     result = run(
-        db, admin, opts=options(rerank=True, fused_top_k=3, final_top_k=2), reranker=reranker
+        db, reader, opts=options(rerank=True, fused_top_k=3, final_top_k=2), reranker=reranker
     )
     assert len(reranker.calls[0][1]) == 3
     assert len(result.candidates) == 2

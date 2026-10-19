@@ -38,14 +38,17 @@ storage. The Next.js frontend talks only to the versioned REST API.
 
 * **Organization** = tenant. Users can belong to several; a session has one *active*
   organization (`POST /auth/switch-organization`).
-* **Organization roles**: `org_admin` (everything in the org, members, audit, usage),
-  `knowledge_manager` (creates workspaces), `employee`.
+* **Organization roles**: `org_admin` (members, invitations, deactivation, every
+  workspace's settings and members, audit log, usage), `knowledge_manager` (creates
+  workspaces), `employee`. Org admins are *content-blind*: no document is readable,
+  manageable or uploadable because of the role. An admin who needs a workspace's documents
+  joins it, which the audit log records (`workspace.member_added`) and its members see.
 * **Workspaces** group documents. Workspace roles: `owner` (members + all documents),
   `editor` (upload, manage own uploads), `viewer` (read).
 * **Document visibility** is stored as grants in `document_permissions`:
   a `workspace` grant on the document's own workspace makes it visible to all workspace
   members; without it the document is *restricted* to users with explicit `user` grants,
-  its uploader (while still in the workspace), workspace owners and org admins.
+  its uploader (while still in the workspace) and workspace owners.
   `manage` grants allow editing a restricted document.
 * `app/services/access.py::readable_documents_clause` is the one predicate used by every
   read path - document APIs, search, chat retrieval and citation rendering - so filters
@@ -64,13 +67,20 @@ storage. The Next.js frontend talks only to the versioned REST API.
   are stored. Idle and absolute expiry; revocation on logout and password change.
 * CSRF: the readable `eka_csrf` cookie holds `HMAC(SECRET_KEY, session token)`; unsafe
   methods must echo it in `X-CSRF-Token`. Cross-site `Origin` headers are rejected.
+* Audit log (`audit_events`; the app role cannot update rows): sign-ins, membership and
+  role changes, deactivation, workspace and document changes, downloads, and what the AI
+  handed out: `chat.answered` (the documents an answer retrieved, cited and inherited from
+  history) and `search.performed` (the documents returned). Identifiers and counts only;
+  never a question, an answer or document text.
+  A document's title appears in the log and the dashboard activity only for someone who can
+  read the document or did the action, so content-blind admins see ids, not titles.
 * Passwords: argon2id; unknown emails still pay for one hash verification. The audit rows
   of a failed sign-in (one per organization of an existing account) are written after the
   401 has been sent, so the response time does not tell whether an account exists.
-* Public registration (`ALLOW_PUBLIC_REGISTRATION=true`, the default) answers
-  `409 email_taken` for an email that already has an account, so it does reveal accounts,
-  at `RATE_LIMIT_REGISTER_PER_HOUR` attempts per IP. Deployments that must not reveal
-  accounts set it to `false` (sign-up by invitation only).
+* Sign-up is by invitation only unless `ALLOW_PUBLIC_REGISTRATION=true` (off by default;
+  `scripts/create_organization.py` makes the first organization on the server). Public
+  registration answers `409 email_taken` for an email that already has an account, so it
+  reveals accounts, at `RATE_LIMIT_REGISTER_PER_HOUR` attempts per IP.
 * Pure-ASGI middleware (so SSE is never buffered): request IDs, access logs, metrics,
   body-size limits (before parsing), security headers.
 * Errors always use `{"error": {"code", "message", "details", "request_id"}}`.

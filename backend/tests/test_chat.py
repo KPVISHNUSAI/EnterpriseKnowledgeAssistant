@@ -17,7 +17,7 @@ from test_answer_fakes import LEAVE, FakeLLM, index_handbook
 
 from app.core.config import get_settings
 from app.db.session import set_tenant
-from app.models import Message, MessageRole, MessageStatus, UsageKind, UsageRecord
+from app.models import AuditEvent, Message, MessageRole, MessageStatus, UsageKind, UsageRecord
 from app.providers.llm import LLMUnavailableError
 from app.providers.registry import get_llm
 from app.rag.answer import ERROR_MESSAGE, REFUSED_MESSAGE
@@ -281,6 +281,30 @@ def test_default_configuration_answers_extractively(login_as, tenant, handbook, 
         Decimal(0),
     )
     assert set(row.timings) == {"retrieval_ms", "generation_ms", "total_ms"}
+
+
+def test_answers_and_searches_are_audited_by_document_never_by_text(login_as, tenant, handbook, db):
+    client = login_as(tenant.viewer, tenant.org)
+    assistant = chat(client)["assistant_message"]
+    search = {"query": "vacation days", "mode": "keyword", "rerank": False}
+    assert client.post("/api/v1/search", json=search).status_code == 200
+
+    set_tenant(db, tenant.org.id)
+    events = {e.action: e for e in db.scalars(select(AuditEvent))}
+    answered, searched = events["chat.answered"], events["search.performed"]
+    assert (answered.actor_user_id, answered.resource_id) == (tenant.viewer.id, assistant["id"])
+    document = str(handbook.id)
+    assert answered.event_metadata == {
+        "conversation_id": assistant["conversation_id"],
+        "status": "complete",
+        "documents_retrieved": [document],
+        "documents_cited": [document],
+        "documents_from_history": [],
+    }
+    assert searched.actor_user_id == tenant.viewer.id
+    assert searched.event_metadata == {"mode": "keyword", "results": 1, "documents": [document]}
+    recorded = str([answered.event_metadata, searched.event_metadata]).lower()
+    assert "vacation" not in recorded  # neither the question nor the passages
 
 
 def test_chat_requires_a_session(client):

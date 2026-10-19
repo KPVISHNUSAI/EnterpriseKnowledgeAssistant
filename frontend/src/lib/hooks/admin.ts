@@ -78,5 +78,13 @@ export function useOrgMemberActions() {
         return refresh();
       },
     }),
+    setActive: useMutation({
+      meta: { inline: true },
+      mutationFn: (v: { userId: string; active: boolean }) => api.organization.setMemberActive(v.userId, v.active),
+      onSuccess: (member) => {
+        toast.success(member.is_active ? "Member reactivated" : "Member deactivated");
+        return refresh();
+      },
+    }),
   };
 }

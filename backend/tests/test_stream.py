@@ -12,13 +12,14 @@ from test_answer_fakes import FakeLLM, index_handbook
 
 from app.core.config import get_settings
 from app.db.session import set_tenant
-from app.models import Message, MessageStatus, UsageRecord
+from app.models import AuditEvent, Message, MessageStatus, UsageRecord
 from app.providers.embeddings import HashingEmbedder
 from app.providers.llm import LLMUnavailableError
 from app.providers.registry import get_llm
 from app.rag.answer import ERROR_MESSAGE
 from app.schemas.chat import ChatRequest
 from app.services import chat as chat_service
+from app.services.audit import RequestMeta
 
 STREAM = "/api/v1/chat/stream"
 QUESTION = "How many vacation days do employees receive?"
@@ -172,6 +173,7 @@ def produce(db, factory, tenant, handbook):
             embedder=HashingEmbedder(settings.embedding_dimensions),
             reranker=None,
             llm=llm,
+            meta=RequestMeta(),
         )
 
     return make
@@ -224,6 +226,9 @@ def test_abandoned_producer_still_persists_the_partial_answer(produce, db, tenan
     assert [s["source_id"] for s in stored.sources] == ["S1", "S2"]
     assert stored.retrieval_metadata["search_query"] == QUESTION
     assert db.scalar(select(func.count()).select_from(Message)) == 2
+    # Its sources already reached the client, so the answer is audited too.
+    (event,) = db.scalars(select(AuditEvent).where(AuditEvent.action == "chat.answered"))
+    assert (event.resource_id, event.event_metadata["status"]) == (str(stored.id), "incomplete")
 
 
 def test_streamed_follow_ups_record_the_documents_behind_their_history(
