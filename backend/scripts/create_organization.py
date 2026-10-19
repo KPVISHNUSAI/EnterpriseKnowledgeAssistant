@@ -9,7 +9,8 @@ It prints a one-time link (valid INVITATION_TTL_HOURS, built from PUBLIC_BASE_UR
 administrator opens it, signs up and chooses their own password, so no password passes
 through a command line, an environment variable or a log. Until it is used, the link is
 as good as a password: hand it over privately. Run the script again while nobody has joined
-the organization to replace a lost or expired link.
+the organization to replace a lost or expired link, or one sent to a wrong address; every
+earlier link then stops working.
 """
 
 from __future__ import annotations

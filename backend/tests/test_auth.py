@@ -302,11 +302,14 @@ def test_sign_up_is_closed_by_default_and_the_first_admin_is_invited_from_the_se
         create_organization.main(["--organization", "Acme", "--email", "not-an-email"])
 
     argv = ["--organization", "Acme", "--email", "Asha@Acme.example"]
-    assert create_organization.main(argv) == 0
-    lost = capsys.readouterr().out.split()[-1].rsplit("/invite/", 1)[1]
-    assert create_organization.main(argv) == 0  # nobody has joined: a new link replaces it
-    token = capsys.readouterr().out.split()[-1].rsplit("/invite/", 1)[1]
-    assert client.get(f"/api/v1/auth/invitations/{lost}").status_code == 404
+    typo = ["--organization", "Acme", "--email", "asah@acme.example"]
+    links = []
+    for args in (typo, argv, argv):  # nobody has joined: each new link replaces the last
+        assert create_organization.main(args) == 0
+        links.append(capsys.readouterr().out.split()[-1].rsplit("/invite/", 1)[1])
+    *replaced, token = links
+    for old_link in replaced:  # also the one sent to another address
+        assert client.get(f"/api/v1/auth/invitations/{old_link}").status_code == 404
 
     response = _register(
         client, email="asha@acme.example", organization_name=None, invite_token=token

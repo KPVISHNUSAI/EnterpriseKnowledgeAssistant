@@ -328,7 +328,7 @@ def invite_first_admin(
 ) -> InvitationCreated:
     """Create an organization and invite its first admin, from the server
     (scripts/create_organization.py): the link lets them choose their own password. For an
-    organization of that name that nobody has joined yet, a new link replaces the last."""
+    organization of that name that nobody has joined yet, a new link replaces all earlier ones."""
     org = db.scalar(
         select(Organization)
         .where(Organization.name == organization_name)
@@ -346,6 +346,13 @@ def invite_first_admin(
             code="organization_has_members",
         )
     set_tenant(db, org.id)
+    # Only this script invites into an organization without members: the new link replaces
+    # every earlier one, also one sent to another (say, mistyped) address.
+    db.execute(
+        update(Invitation)
+        .where(Invitation.organization_id == org.id, *pending_invitations())
+        .values(revoked_at=utcnow())
+    )
     body = InvitationCreate(email=email, role=OrgRole.ORG_ADMIN)
     return _invite(db, org.id, body, inviter=None, meta=meta)
 
