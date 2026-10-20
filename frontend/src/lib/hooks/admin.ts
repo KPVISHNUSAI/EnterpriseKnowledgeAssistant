@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api/endpoints";
-import type { AuditQuery, OrgRole } from "@/lib/api/types";
+import type { AuditQuery, OrgRole, ProofRun } from "@/lib/api/types";
 import { keys } from "./keys";
 
 export function useUsage(days: number) {
@@ -87,4 +87,33 @@ export function useOrgMemberActions() {
       },
     }),
   };
+}
+
+const proofActive = (run: ProofRun | undefined) => run?.status === "queued" || run?.status === "running";
+const PROOF_POLL_MS = 2000;
+
+export function useProofRuns(query: { page: number; page_size: number }) {
+  return useQuery({
+    queryKey: keys.proofRuns(query),
+    queryFn: () => api.admin.proofRuns(query),
+    placeholderData: keepPreviousData,
+    refetchInterval: (q) => (q.state.data?.items.some(proofActive) ? PROOF_POLL_MS : false),
+  });
+}
+
+export function useProofRun(id: string) {
+  return useQuery({
+    queryKey: keys.proofRun(id),
+    queryFn: () => api.admin.proofRun(id),
+    refetchInterval: (q) => (proofActive(q.state.data) ? PROOF_POLL_MS : false),
+  });
+}
+
+export function useStartProof() {
+  const client = useQueryClient();
+  return useMutation({
+    meta: { inline: true }, // "a run is already active" and simulation errors are shown in place
+    mutationFn: api.admin.startProof,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.proof }),
+  });
 }

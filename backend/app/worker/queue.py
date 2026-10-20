@@ -9,6 +9,7 @@ import uuid
 logger = logging.getLogger(__name__)
 
 INGESTION_TASK = "eka.ingestion.process"
+PROOF_TASK = "eka.proof.run"
 
 
 def enqueue_ingestion(
@@ -28,4 +29,18 @@ def enqueue_ingestion(
         return True
     except Exception:
         logger.exception("ingestion.enqueue_failed", extra={"job_id": str(job_id)})
+        return False
+
+
+def enqueue_proof(run_id: uuid.UUID, organization_id: uuid.UUID) -> bool:
+    """Best effort, after the run row is committed; the caller marks the run failed."""
+    from app.worker.celery_app import celery_app
+
+    try:
+        celery_app.send_task(
+            PROOF_TASK, args=[str(run_id), str(organization_id)], queue="maintenance"
+        )
+        return True
+    except Exception:
+        logger.exception("proof.enqueue_failed", extra={"run_id": str(run_id)})
         return False

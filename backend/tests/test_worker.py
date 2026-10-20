@@ -276,16 +276,20 @@ def test_tasks_routes_and_schedule():
         "eka.ingestion.process",
         "eka.maintenance.requeue_stale_jobs",
         "eka.maintenance.apply_retention",
+        "eka.proof.run",
+        "eka.proof.schedule",
     } <= set(celery_app.tasks)
     conf = celery_app.conf
     assert conf.task_routes == {
         "eka.ingestion.*": {"queue": "ingestion"},
         "eka.maintenance.*": {"queue": "maintenance"},
+        "eka.proof.*": {"queue": "maintenance"},
     }
     schedule = {entry["task"]: entry["schedule"] for entry in conf.beat_schedule.values()}
     assert schedule == {
         "eka.maintenance.requeue_stale_jobs": 60.0,
         "eka.maintenance.apply_retention": crontab(minute=15, hour="*/6"),
+        "eka.proof.schedule": crontab(minute=0, hour=2, day_of_week=1),  # Mondays
     }
     lease = get_settings().ingestion_lease_seconds
     assert (conf.task_time_limit, conf.task_soft_time_limit) == (lease, lease - 60)

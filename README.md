@@ -19,6 +19,11 @@ it is grounded in or says that the documents do not contain the answer.
 * **Operations.** Background ingestion with leased jobs, retries and a reaper; audit log;
   token usage and estimated cost; Prometheus metrics; structured logs that never contain
   document text; Docker images, CI and AWS deployment templates.
+* **Permission Proof.** A leak test that admins run, or that runs weekly by itself. It asks
+  the assistant, as every access group, about every document that group cannot read (a
+  sample above `PERMISSION_PROOF_MAX_PROBES` questions), and checks what would have been
+  sent to the model. A simulated mis-share proves the test
+  can fail ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#permission-proof)).
 * **Evaluation suite.** Separate retrieval and generation metrics over a synthetic corpus,
   comparing vector-only, hybrid and hybrid + rerank retrieval
   ([docs/EVALUATION.md](docs/EVALUATION.md)).
@@ -224,6 +229,7 @@ a safe local default or an empty placeholder. Validation lives in
 | Retrieval | `RETRIEVAL_MODE`, `RETRIEVAL_VECTOR_TOP_K`, `RETRIEVAL_KEYWORD_TOP_K`, `RETRIEVAL_RRF_K`, `RETRIEVAL_FINAL_TOP_K`, `RETRIEVAL_MIN_RERANK_SCORE`, `CONTEXT_MAX_TOKENS`, `HNSW_EF_SEARCH`, `QUERY_REWRITE_ENABLED` |
 | Chunking | `CHUNK_TARGET_TOKENS`, `CHUNK_MAX_TOKENS`, `CHUNK_OVERLAP_TOKENS` |
 | Retention | `CONVERSATION_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`, `USAGE_RETENTION_DAYS` |
+| Permission proof | `PERMISSION_PROOF_MAX_PROBES`, `PERMISSION_PROOF_SCHEDULE` |
 | Metrics | `METRICS_ENABLED`, `METRICS_TOKEN` |
 
 `EMBEDDING_DIMENSIONS` and `FTS_CONFIG` are read when the migrations create the schema.
@@ -432,6 +438,10 @@ and manual inspection in [docs/EVALUATION.md](docs/EVALUATION.md#results)):
   as sanitized Markdown with raw HTML and images disabled.
 * **Secrets and logs.** Configuration comes only from the environment or a secrets
   manager. Logs never contain document text, prompts, answers, passwords, tokens or keys.
+* **Evidence.** Permission Proof (Administration, "Permission proof") re-checks the
+  authorization rule above with a second, independent implementation and tests the chat's
+  own retrieval and prompt assembly against it, for every access group. Reports hold ids
+  and counts, never document text.
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#tenancy-and-authorization).
 
@@ -484,19 +494,25 @@ Production issues (ALB timeouts, migrations, secrets) are covered in
 
 Tested, with results reported from actual runs:
 
-* **Backend.** 1093 tests: unit tests, and integration tests against PostgreSQL with pgvector
+* **Backend.** 1145 tests: unit tests, and integration tests against PostgreSQL with pgvector
   and Redis. They include the real embedding model and cross-encoder, and a live Ollama
   server for the OpenAI-compatible provider. CI runs everything except the real-model tests
   on every push.
-* **Frontend.** 155 Vitest tests, ESLint, TypeScript and the production build.
-* **End-to-end.** 27 Playwright tests in Chromium against the real stack (API, worker,
+* **Frontend.** 176 Vitest tests, ESLint, TypeScript and the production build.
+* **End-to-end.** 29 Playwright tests in Chromium against the real stack (API, worker,
   frontend, PostgreSQL, Redis). They cover permissions, cross-tenant access, XSS payloads,
-  CSRF, streaming and Stop. The run also checks that the service logs contain no passwords,
-  keys, document text or questions. All 27 passed in each of two consecutive local runs
-  (macOS) and in GitHub Actions (Ubuntu).
+  CSRF, streaming and Stop, and the leak test. The run also checks that the service logs
+  contain no passwords, keys, document text or questions. All 29 passed in a local run
+  (macOS); CI runs them on every push.
 * **Container stack.** The full stack (`make up-app`) was tested by hand: register, upload,
   ingestion, hybrid search with reranking, and a streamed answer with a verified citation.
 * **RAG evaluation**, as described above.
+* **Permission Proof** on the evaluation corpus with the real embedding model: the leak
+  test passed (5 access groups, 114 questions, no findings, under 3 s), and a simulated
+  mis-share of one workspace was caught (30 findings). Its tests break the application on
+  purpose: an admin bypass, a retrieval filter that ignores permissions, an uploader rule
+  that ignores membership, and text reaching the model request another way each fail the
+  run.
 
 Not tested:
 

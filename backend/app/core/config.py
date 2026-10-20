@@ -173,6 +173,12 @@ class Settings(BaseSettings):
     audit_retention_days: int = 730
     usage_retention_days: int = 400
 
+    # --- Permission Proof (app/proof) ----------------------------------------------------
+    permission_proof_max_probes: int = Field(5000, ge=1)
+    # Weekly leak test per organization, as crontab fields (minute hour day month weekday,
+    # UTC); empty disables it.
+    permission_proof_schedule: str = "0 2 * * 1"
+
     # --- Observability -------------------------------------------------------------------
     metrics_enabled: bool = True
     metrics_token: SecretStr | None = None
@@ -191,6 +197,13 @@ class Settings(BaseSettings):
         if not _IDENTIFIER.match(value):
             raise ValueError("must be a lowercase SQL identifier")
         return value
+
+    @field_validator("permission_proof_schedule")
+    @classmethod
+    def _crontab(cls, value: str) -> str:
+        if value.strip() and len(value.split()) != 5:
+            raise ValueError("must be five crontab fields, or empty")
+        return value.strip()
 
     @model_validator(mode="after")
     def _validate(self) -> Settings:

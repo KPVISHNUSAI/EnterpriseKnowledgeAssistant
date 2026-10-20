@@ -64,6 +64,11 @@ export type StreamError = { code: string; message: string };
 export type Dashboard = S["DashboardResponse"];
 export type AuditEvent = S["AuditEventOut"];
 export type Usage = S["UsageResponse"];
+export type ProofRun = S["RunOut"];
+export type ProofRunDetail = S["RunDetail"];
+export type ProofRunCreate = S["RunCreate"];
+export type ProofGroup = S["GroupOut"];
+export type ProofFinding = S["FindingOut"];
 
 export type Page<T> = { items: T[]; total: number; page: number; page_size: number };
 

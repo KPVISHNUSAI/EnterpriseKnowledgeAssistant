@@ -834,6 +834,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/permission-proof/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Permission Proofs
+         * @description Leak tests, newest first.
+         */
+        get: operations["list_permission_proofs_api_v1_admin_permission_proof_runs_get"];
+        put?: never;
+        /**
+         * Start Permission Proof
+         * @description Queue a leak test: as every access group, ask about every document the group may
+         *     not read and check what would reach the model. With `simulate`, test one person as if
+         *     wrongly given a workspace; nothing is changed, and the run must report findings. 409
+         *     while a run is active; 422 for a simulation that could not catch anything.
+         */
+        post: operations["start_permission_proof_api_v1_admin_permission_proof_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/permission-proof/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Permission Proof
+         * @description One leak test with its access groups and findings. Reports never hold document
+         *     text, and a document's title only if the caller may read the document.
+         */
+        get: operations["get_permission_proof_api_v1_admin_permission_proof_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1261,6 +1309,65 @@ export interface components {
          * @enum {string}
          */
         FileType: "pdf" | "docx" | "txt" | "md";
+        /** FindingOut */
+        FindingOut: {
+            /** Group */
+            group: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "retrieved" | "prompt_text" | "access_extra" | "access_missing";
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /** Title */
+            title?: string | null;
+            workspace?: components["schemas"]["WorkspaceRef"] | null;
+            /** Count */
+            count: number;
+        };
+        /** GroupOut */
+        GroupOut: {
+            /** Number */
+            number: number;
+            /** Members */
+            members: components["schemas"]["PersonRef"][];
+            representative: components["schemas"]["PersonRef"];
+            /** Workspaces */
+            workspaces: components["schemas"]["GroupWorkspace"][];
+            simulated_workspace?: components["schemas"]["WorkspaceRef"] | null;
+            /** Readable Documents */
+            readable_documents: number;
+            /** Documents Unreadable */
+            documents_unreadable: number;
+            /** Documents Probed */
+            documents_probed: number;
+            /** Probes Planned */
+            probes_planned: number;
+            /** Probes Run */
+            probes_run: number;
+            /** Prompts Checked */
+            prompts_checked: number;
+            /** Passages Checked */
+            passages_checked: number;
+            /** Findings */
+            findings: number;
+        };
+        /** GroupWorkspace */
+        GroupWorkspace: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Name */
+            name?: string | null;
+            /** Role */
+            role: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1646,11 +1753,34 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** Page[RunOut] */
+        Page_RunOut_: {
+            /** Items */
+            items: components["schemas"]["RunOut"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
         /**
          * PermissionLevel
          * @enum {string}
          */
         PermissionLevel: "read" | "manage";
+        /** PersonRef */
+        PersonRef: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Full Name */
+            full_name?: string | null;
+            /** Email */
+            email?: string | null;
+        };
         /**
          * PrincipalType
          * @enum {string}
@@ -1690,6 +1820,89 @@ export interface components {
             organization_name?: string | null;
             /** Invite Token */
             invite_token?: string | null;
+        };
+        /** RunCreate */
+        RunCreate: {
+            /** @description Test one person as if the application had wrongly let them read this workspace. Nothing is changed; the run must report findings. */
+            simulate?: components["schemas"]["SimulationIn"] | null;
+        };
+        /** RunDetail */
+        RunDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "manual" | "scheduled" | "simulation";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "completed" | "error" | "interrupted";
+            /** Verdict */
+            verdict?: ("passed" | "failed" | "nothing_to_test") | null;
+            requested_by?: components["schemas"]["PersonRef"] | null;
+            simulation?: components["schemas"]["SimulationOut"] | null;
+            /** Error */
+            error?: string | null;
+            /** Summary */
+            summary: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Groups */
+            groups: components["schemas"]["GroupOut"][];
+            /** Findings */
+            findings: components["schemas"]["FindingOut"][];
+        };
+        /** RunOut */
+        RunOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "manual" | "scheduled" | "simulation";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "completed" | "error" | "interrupted";
+            /** Verdict */
+            verdict?: ("passed" | "failed" | "nothing_to_test") | null;
+            requested_by?: components["schemas"]["PersonRef"] | null;
+            simulation?: components["schemas"]["SimulationOut"] | null;
+            /** Error */
+            error?: string | null;
+            /** Summary */
+            summary: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
         };
         /**
          * SearchFilters
@@ -1784,6 +1997,24 @@ export interface components {
             /** Score */
             score: number;
             explanation: components["schemas"]["MatchExplanation"];
+        };
+        /** SimulationIn */
+        SimulationIn: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** SimulationOut */
+        SimulationOut: {
+            person: components["schemas"]["PersonRef"];
+            workspace: components["schemas"]["WorkspaceRef"];
         };
         /**
          * SortOrder
@@ -2047,6 +2278,16 @@ export interface components {
             can_manage: boolean;
             /** Can Upload */
             can_upload: boolean;
+        };
+        /** WorkspaceRef */
+        WorkspaceRef: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Name */
+            name?: string | null;
         };
         /**
          * WorkspaceRole
@@ -4879,6 +5120,175 @@ export interface operations {
             };
             /** @description Forbidden (missing permission or CSRF token) */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_permission_proofs_api_v1_admin_permission_proof_runs_get: {
+        parameters: {
+            query?: {
+                /** @description 1-based page number */
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_RunOut_"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden (missing permission or CSRF token) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_permission_proof_api_v1_admin_permission_proof_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden (missing permission or CSRF token) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_permission_proof_api_v1_admin_permission_proof_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden (missing permission or CSRF token) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found (or not visible to the caller) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

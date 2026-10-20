@@ -16,5 +16,8 @@ export const keys = {
   messages: (conversationId: string) => ["conversations", conversationId, "messages"] as const,
   usage: (days: number) => ["admin", "usage", days] as const,
   audit: (params: object) => ["admin", "audit", params] as const,
+  proof: ["admin", "proof"] as const,
+  proofRuns: (params: object) => ["admin", "proof", "runs", params] as const,
+  proofRun: (id: string) => ["admin", "proof", "run", id] as const,
   search: (params: object) => ["search", params] as const,
 };

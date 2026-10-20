@@ -13,6 +13,7 @@ from app.models.document import (
     PrincipalType,
 )
 from app.models.organization import Invitation, Organization, OrganizationMembership, OrgRole
+from app.models.proof import PermissionProofRun, ProofKind, ProofStatus, ProofVerdict
 from app.models.user import User, UserSession
 from app.models.workspace import Workspace, WorkspaceMembership, WorkspaceRole
 
@@ -28,6 +29,7 @@ TENANT_TABLES = (
     "messages",
     "audit_events",
     "usage_records",
+    "permission_proof_runs",
 )
 
 __all__ = [
@@ -50,7 +52,11 @@ __all__ = [
     "Organization",
     "OrganizationMembership",
     "PermissionLevel",
+    "PermissionProofRun",
     "PrincipalType",
+    "ProofKind",
+    "ProofStatus",
+    "ProofVerdict",
     "UsageKind",
     "UsageRecord",
     "User",

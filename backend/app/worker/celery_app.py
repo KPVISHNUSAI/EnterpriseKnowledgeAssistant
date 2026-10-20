@@ -40,6 +40,7 @@ celery_app.conf.update(
     task_routes={
         "eka.ingestion.*": {"queue": "ingestion"},
         "eka.maintenance.*": {"queue": "maintenance"},
+        "eka.proof.*": {"queue": "maintenance"},
     },
     beat_schedule={
         "requeue-stale-ingestion-jobs": {
@@ -55,6 +56,20 @@ celery_app.conf.update(
     },
     timezone="UTC",
 )
+if settings.permission_proof_schedule:
+    minute, hour, day_of_month, month_of_year, day_of_week = (
+        settings.permission_proof_schedule.split()
+    )
+    celery_app.conf.beat_schedule["permission-proof-leak-test"] = {
+        "task": "eka.proof.schedule",
+        "schedule": crontab(
+            minute=minute,
+            hour=hour,
+            day_of_month=day_of_month,
+            month_of_year=month_of_year,
+            day_of_week=day_of_week,
+        ),
+    }
 
 
 @signals.setup_logging.connect

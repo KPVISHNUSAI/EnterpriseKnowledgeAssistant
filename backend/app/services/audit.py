@@ -51,6 +51,8 @@ class AuditAction(StrEnum):
     # Which documents reached a user through the AI, never the question or the text.
     CHAT_ANSWERED = "chat.answered"
     SEARCH_PERFORMED = "search.performed"
+    PERMISSION_PROOF_REQUESTED = "permission_proof.run_requested"
+    PERMISSION_PROOF_COMPLETED = "permission_proof.run_completed"
     ACCESS_DENIED = "security.access_denied"
 
 

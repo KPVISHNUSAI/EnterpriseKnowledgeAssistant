@@ -23,6 +23,9 @@ import type {
   Organization,
   Page,
   PermissionLevel,
+  ProofRun,
+  ProofRunCreate,
+  ProofRunDetail,
   SearchRequest,
   SearchResponse,
   Usage,
@@ -117,6 +120,10 @@ export const api = {
   admin: {
     auditEvents: (query: AuditQuery) => request<Page<AuditEvent>>("GET", "/admin/audit-events", { query }),
     usage: (days: number) => request<Usage>("GET", "/admin/usage", { query: { days } }),
+    proofRuns: (query: Paging) => request<Page<ProofRun>>("GET", "/admin/permission-proof/runs", { query }),
+    proofRun: (id: string) => request<ProofRunDetail>("GET", `/admin/permission-proof/runs/${seg(id)}`),
+    startProof: (body: ProofRunCreate) =>
+      request<ProofRunDetail>("POST", "/admin/permission-proof/runs", { json: body }),
   },
 };
 

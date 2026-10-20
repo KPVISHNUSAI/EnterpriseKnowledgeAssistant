@@ -61,6 +61,57 @@ storage. The Next.js frontend talks only to the versioned REST API.
   (`NOSUPERUSER NOBYPASSRLS`); migrations run as the owner role `eka_owner`. Composite
   foreign keys `(x_id, organization_id)` make cross-tenant references impossible.
 
+## Permission Proof
+
+A leak test of the rule above (`app/proof/`, `app/services/permission_proof.py`), run
+from Administration or weekly by Celery beat (`PERMISSION_PROOF_SCHEDULE`). It answers the
+question a security reviewer asks: would the assistant ever send a person text from a
+document they cannot read?
+
+1. **Snapshot.** The run reads memberships, grants, documents and chunks in one
+   `REPEATABLE READ` transaction, so a permission change made while it runs cannot raise a
+   false alarm.
+2. **A second rule.** `app/proof/oracle.py` implements the read rule again, sharing no code
+   with `access.py`, so a bug in one is not repeated in the other. A test compares the two
+   on randomly generated permission graphs.
+3. **Access groups.** Active members with the same organization role, the same workspace
+   roles and the same readable documents form one group; its first member by email is
+   asked for the whole group. The application's readable set must equal the second rule's
+   for every member, not only the one asked: the rule also reads per-person records
+   (uploads, personal grants).
+4. **Questions.** For every indexed document a group cannot read, up to three questions
+   taken from the document itself: its title, and up to 300 characters from the start of
+   its first and of its middle chunk. Copied text is the strongest way to pull a document
+   into retrieval. At most `PERMISSION_PROOF_MAX_PROBES` questions per run; above that, a
+   deterministic sample spread over groups and documents, and the report says so.
+5. **Checks.** Each question goes through the chat's own `retrieve` (reranking off: it
+   only reorders the same candidates), `build_context` and prompt assembly. No model is
+   called. Every candidate must come from a document the group can read, and the exact
+   model request, built without the question and without the fixed system prompt, must
+   hold no 50-character run of normalized text that occurs only in documents the group
+   cannot read (an index of windows taken every 25 characters makes this fast). A
+   document's title and section names count as its text, since the request names them.
+6. **Verdict.** Passed, failed (with findings per group and document), or nothing to test
+   when every group can read every indexed document.
+
+**Simulation.** An admin picks a person and a workspace they are not in. The run asks
+only as that person, with an in-memory viewer membership of the workspace, while the
+second rule keeps the real records: the run must report findings ("caught"). Nothing is
+written to memberships or grants, and the admin page's "latest result" skips
+simulations.
+
+**What it shows, and what it does not.** For the questions it asked, the application's
+retrieval and model requests stayed within the documented rule. It does not show that the
+permissions themselves are right, or anything about paths other than retrieval.
+
+**Operation.** Org admins only (`/api/v1/admin/permission-proof/runs`). One run at a time
+per organization; a run created more than `INGESTION_LEASE_SECONDS` + 60 s ago that is
+still queued or running is shown as interrupted and no longer blocks a new one. Runs execute on the `maintenance`
+queue, so a long run delays ingestion on a single worker. Reports hold ids and counts,
+never text; a finding shows a document's title only to a viewer who may read the
+document. Both events are in the audit log (`permission_proof.run_requested`,
+`permission_proof.run_completed`).
+
 ## Sessions, CSRF and request hygiene
 
 * Opaque 256-bit session tokens in an HttpOnly `SameSite=Lax` cookie; only SHA-256 hashes

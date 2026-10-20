@@ -89,7 +89,7 @@ function UserMenu() {
 
 export function TopBar({ onOpenNav }: { onOpenNav: () => void }) {
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur">
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur print:hidden">
       <IconButton label="Open navigation" onClick={onOpenNav} className="lg:hidden">
         <MenuIcon aria-hidden className="size-5" />
       </IconButton>

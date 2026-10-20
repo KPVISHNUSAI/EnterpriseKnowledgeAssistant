@@ -23,7 +23,7 @@ function Chrome({ children }: { children: ReactNode }) {
       >
         Skip to main content
       </a>
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 border-r border-slate-200 bg-white lg:block">
+      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 border-r border-slate-200 bg-white lg:block print:hidden!">
         <Sidebar capabilities={capabilities} />
       </aside>
       <Drawer open={navOpen} onOpenChange={setNavOpen} title="Navigation" className="lg:hidden">
