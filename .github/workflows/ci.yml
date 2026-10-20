@@ -61,6 +61,8 @@ jobs:
         run: uv python install
       - name: Check that uv.lock matches pyproject.toml
         run: uv lock --check
+      # Known vulnerabilities (OSV) in every locked package, extras and dev tools included.
+      - run: uv audit --frozen
       # Dev group only: tests use the hashing embedder, so no torch (local-models extra).
       - run: uv sync --frozen
       - run: uv run --frozen ruff check .
@@ -85,6 +87,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Known vulnerabilities in what ships. Dev tools are not gated: eslint-config-next pulls in
+      # braces <= 3.0.3 (GHSA-vfj7-8cjw-p6xm), which has no fixed release and only expands lint globs.
+      - run: npm audit --omit=dev
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test

@@ -5,7 +5,7 @@ API_PORT ?= 8081
 EVAL_NAME ?= $(shell date +%Y-%m-%d)
 EVAL_LLM_CONFIGS ?= vector,hybrid,hybrid_rerank
 
-.PHONY: help check-ports infra-up infra-down docker-build up-app down-app migrate seed api worker beat test test-unit e2e eval eval-llm lint format typecheck check
+.PHONY: help check-ports infra-up infra-down docker-build up-app down-app migrate seed api worker beat test test-unit e2e eval eval-llm lint format typecheck audit check
 
 help:
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -70,4 +70,7 @@ format: ## Auto-format and fix lint
 typecheck: ## Static type check
 	$(UV) mypy
 
-check: lint typecheck test ## Everything CI runs for the backend
+audit: ## Known vulnerabilities in the locked backend dependencies (needs network)
+	uv audit --directory backend --frozen
+
+check: lint typecheck audit test ## Everything CI runs for the backend

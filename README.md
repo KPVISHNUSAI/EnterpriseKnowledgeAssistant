@@ -321,11 +321,12 @@ The streaming protocol is described in [docs/GENERATION.md](docs/GENERATION.md#s
 | What | Command | Needs |
 |---|---|---|
 | Backend lint, format, types | `make lint`, `make typecheck` | nothing |
+| Backend dependency audit (known vulnerabilities, OSV) | `make audit` | network access |
 | Backend unit tests | `make test-unit` | nothing |
 | Backend unit + integration tests | `make test` | `make infra-up` |
 | Real-model tests (embedding model, cross-encoder, live Ollama) | `cd backend && uv run pytest -m slow` | `local-models` extra; Ollama for the LLM tests (skipped otherwise) |
 | Everything CI runs for the backend | `make check` | `make infra-up` |
-| Frontend | `cd frontend && npm run lint && npm run typecheck && npm test && npm run build` | nothing |
+| Frontend | `cd frontend && npm audit --omit=dev && npm run lint && npm run typecheck && npm test && npm run build` | network access for the audit |
 | End-to-end (Playwright) | `make e2e` ([e2e/README.md](e2e/README.md)) | `make infra-up`, `npm ci` in `frontend/` and `e2e/`, `npx playwright install chromium`; the suite starts its own stack |
 | RAG evaluation | `make eval`, then optionally `make eval-llm` ([Evaluation](#evaluation)) | `make infra-up` and the `local-models` extra; Ollama for `eval-llm` |
 
@@ -341,9 +342,13 @@ crafted search filters and chat scopes, RLS without the application layer, CSRF 
 `Origin` checks, and prompt injection inside documents.
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull
-request. Its jobs: the backend (lock check, ruff, mypy, pytest against PostgreSQL with
-pgvector and Redis services), the frontend (lint, typecheck, Vitest, production build),
-the Docker images, the compose file and AWS templates, and the end-to-end suite.
+request. Its jobs: the backend (lock check, dependency audit, ruff, mypy, pytest against
+PostgreSQL with pgvector and Redis services), the frontend (audit of the production
+dependencies, lint, typecheck, Vitest, production build), the Docker images, the compose
+file and AWS templates, and the end-to-end suite. The audits fail on any known
+vulnerability. The frontend's development tools are not audited: `eslint-config-next`
+depends on `braces`, which has an advisory with no fixed release (GHSA-vfj7-8cjw-p6xm),
+and it only expands lint file patterns.
 
 ## Evaluation
 
