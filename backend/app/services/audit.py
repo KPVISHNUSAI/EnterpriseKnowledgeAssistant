@@ -47,6 +47,11 @@ class AuditAction(StrEnum):
     DOCUMENT_REINDEX_REQUESTED = "document.reindex_requested"
     DOCUMENT_PERMISSIONS_CHANGED = "document.permissions_changed"
     DOCUMENT_DOWNLOADED = "document.downloaded"
+    # Text addressed to AI assistants: found at indexing (no actor), let into or kept out
+    # of answers by a document manager. Counts and pages only, never the text.
+    DOCUMENT_INSTRUCTIONS_FLAGGED = "document.instructions_flagged"
+    DOCUMENT_FLAGGED_TEXT_INCLUDED = "document.flagged_text_included"
+    DOCUMENT_FLAGGED_TEXT_EXCLUDED = "document.flagged_text_excluded"
     CONVERSATION_DELETED = "conversation.deleted"
     # Which documents reached a user through the AI, never the question or the text.
     CHAT_ANSWERED = "chat.answered"

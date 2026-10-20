@@ -95,6 +95,9 @@ export const api = {
     remove: (id: string) => request<void>("DELETE", `/documents/${seg(id)}`),
     reindex: (id: string) => request<DocumentStatusInfo>("POST", `/documents/${seg(id)}/reindex`),
     chunks: (id: string, query: Paging) => request<Page<Chunk>>("GET", `/documents/${seg(id)}/chunks`, { query }),
+    /** `version`: the document version whose flagged text the manager reviewed. */
+    setFlaggedText: (id: string, included: boolean, version: number) =>
+      request<DocumentDetail>("PUT", `/documents/${seg(id)}/flagged-text`, { json: { included, version } }),
     updatePermissions: (
       id: string,
       body: {

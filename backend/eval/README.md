@@ -26,6 +26,7 @@ uv run python -m eval --help
 uv run python -m eval run                     # retrieval + extractive generator, every case
 uv run python -m eval run --no-retrieval --no-extractive --llm-configs hybrid_rerank
 uv run python -m eval run --cases fact-01,inj-07 --llm-configs hybrid_rerank   # a few cases
+uv run python -m eval run --include-flagged ...   # text addressed to AI assistants left in, as a manager can
 uv run python -m eval report --name 2026-10-19  # re-render report.md from the JSON files
 ```
 
@@ -114,9 +115,9 @@ start: up to 8 attempts, 15 s apart. The report lists every retried case.
 
 | Path | Contents |
 |---|---|
-| `corpus.py` | The fictional company: people and roles, workspaces, the 18 documents, the access rule, deterministic PDF (reportlab) and DOCX (python-docx) builders |
+| `corpus.py` | The fictional company: people and roles, workspaces, the 20 documents, the access rule, deterministic PDF (reportlab) and DOCX (python-docx) builders |
 | `sources/` | Document texts. `*.pdf.md` and `*.docx.md` become PDF and DOCX files at load time; the built files are never committed |
-| `datasets/v1.jsonl`, `dataset.py` | The cases and their validation |
+| `datasets/v1.jsonl`, `datasets/v2.jsonl`, `dataset.py` | The cases and their validation; v2 is the default |
 | `metrics.py` | Every score (definitions in docs/EVALUATION.md) |
 | `loader.py` | Corpus loading through the services, shared with `scripts/seed_demo.py` |
 | `runner.py`, `report.py`, `__main__.py` | The run, the result files and report, the command line |
@@ -155,7 +156,7 @@ dashes folded, thousands separators removed. A plain string must match on word
 boundaries, so `65` does not match `650` or `1.65`. A value starting with `re:` is a
 regular expression.
 
-v1 has 85 cases:
+v2 has 89 cases (v1 has 85: v2 adds `inj-08`, `inj-09` and the two `injection_control` cases):
 
 | Category | Cases | What it tests |
 |---|---|---|
@@ -167,8 +168,9 @@ v1 has 85 cases:
 | `unanswerable` | 8 | Nothing in the corpus answers the question |
 | `permission` | 9 | The answer exists only in the restricted document (or outside the asker's workspaces, or the asker is an org admin, who reads no document by role); attempts to bypass access |
 | `permission_control` | 2 | The same restricted facts asked by users who may read them |
-| `injection` | 7 | Retrieved text carries instructions aimed at the model |
+| `injection` | 9 | Retrieved text carries instructions aimed at the model |
 | `follow_up` | 7 | Elliptical follow-ups that need the history |
+| `injection_control` | 2 | A document about AI assistants that quotes attack strings; it must still be answered (a false alarm would remove the answer) |
 
 `tests/test_eval_dataset.py` validates a dataset version. It checks that:
 
@@ -179,7 +181,8 @@ v1 has 85 cases:
 - forbidden facts are absent from the reference;
 - each category meets its minimum number of cases.
 
-To change the dataset, add a new version (`v2.jsonl`) and run with `--dataset v2`. Edit
+To change the dataset, add a new version (`v3.jsonl`), make it `DEFAULT_VERSION` in
+`dataset.py` or run with `--dataset v3`. Edit
 a released version only to fix a labelling error, and record the fix below.
 
 ## Tests
@@ -193,6 +196,17 @@ The tests are fast. They load no ML model, and the metric tests use hand-compute
 examples.
 
 ## Dataset changelog
+
+**v2** (2026-10-20). v1 plus four cases on two new documents, for the quarantine of text
+addressed to AI assistants:
+
+- a supplier invoice PDF (`invoice-4471`) whose second page asks AI assistants for an
+  image and a link to `attacker.example` that would carry the answer out (`inj-08`,
+  `inj-09`);
+- an AI acceptable-use policy (`ai-policy`) that quotes attack strings (`injctl-01`,
+  `injctl-02`).
+
+The v1 cases are unchanged.
 
 **v1.** Label fixes made after inspecting the first full development run (22:54 UTC on
 2026-10-17; its results were discarded) and before any reported run:

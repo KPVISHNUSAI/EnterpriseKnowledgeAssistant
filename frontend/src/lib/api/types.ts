@@ -31,6 +31,8 @@ export type DocumentStatusInfo = S["DocumentStatusOut"];
 export type IngestionJob = S["IngestionJobOut"];
 export type FileType = S["FileType"];
 export type Chunk = S["ChunkOut"];
+export type ChunkFlag = S["ChunkFlag"];
+export type FlagRule = S["FlagRule"];
 export type DocumentSort = S["DocumentSort"];
 export type SortOrder = S["SortOrder"];
 

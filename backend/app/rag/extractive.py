@@ -10,6 +10,7 @@ from collections.abc import Generator, Sequence
 from dataclasses import dataclass
 
 from app.rag.citations import split_sentences, terms
+from app.rag.context import REMOVED
 from app.rag.types import ContextPassage
 
 INSUFFICIENT_MESSAGE = (
@@ -66,7 +67,7 @@ def select_sentences(question: str, passages: Sequence[ContextPassage]) -> list[
     scored: list[Pick] = []
     for passage in passages:
         for sentence in split_sentences(passage.text):
-            if len(sentence) < _MIN_SENTENCE_CHARS:
+            if len(sentence) < _MIN_SENTENCE_CHARS or REMOVED in sentence:
                 continue
             covered = frozenset(weights) & frozenset(terms(sentence))
             coverage = sum(weights[term] for term in covered) / total

@@ -76,6 +76,8 @@ class Candidate:
     section_title: str | None
     heading_path: str | None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # A document manager let this document's flagged text (metadata["flags"]) into answers.
+    include_flagged: bool = False
     # Per-method evidence, kept for explainability ("why did this match?").
     vector_rank: int | None = None
     vector_similarity: float | None = None
@@ -102,7 +104,7 @@ class RetrievalResult:
 class ContextPassage:
     source_id: str  # "S1", "S2", ... referenced by citations
     candidate: Candidate  # primary candidate (metadata for citations)
-    text: str  # exact text shown to the LLM (may merge adjacent chunks)
+    text: str  # document text shown to the LLM (may merge adjacent chunks; flags removed)
     token_count: int
     chunk_ids: list[uuid.UUID] = field(default_factory=list)
 

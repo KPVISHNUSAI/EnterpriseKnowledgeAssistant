@@ -13,8 +13,10 @@ import html
 import re
 from collections.abc import Sequence
 
+from app.ingestion.instructions import find_instructions
 from app.providers.llm import LLMMessage
-from app.rag.types import ChatTurn, ContextPassage
+from app.rag.context import REMOVED
+from app.rag.types import Candidate, ChatTurn, ContextPassage
 
 SYSTEM_PROMPT = """\
 You are an enterprise knowledge assistant. You answer questions strictly from the sources
@@ -99,16 +101,24 @@ def render_sources(passages: Sequence[ContextPassage]) -> str:
     parts = ["<sources>"]
     for passage in passages:
         c = passage.candidate
-        attributes = {"id": passage.source_id, "title": c.document_title}
+        attributes = {"id": passage.source_id, "title": _named(c.document_title, c)}
         if c.page_number is not None:
             page_end = c.page_end if c.page_end and c.page_end != c.page_number else None
             attributes["page"] = f"{c.page_number}-{page_end}" if page_end else str(c.page_number)
         if c.section_title:
-            attributes["section"] = c.section_title
+            attributes["section"] = _named(c.section_title, c)
         rendered = " ".join(f'{k}="{html.escape(v, quote=True)}"' for k, v in attributes.items())
         parts.append(f"<source {rendered}>\n{neutralize(passage.text)}\n</source>")
     parts.append("</sources>")
     return "\n".join(parts)
+
+
+def _named(name: str, candidate: Candidate) -> str:
+    """A title or heading addressed to AI assistants is left out like flagged text. It is
+    checked here, not at ingestion, so renamed and earlier-indexed documents are covered."""
+    if candidate.include_flagged or not find_instructions(name):
+        return name
+    return REMOVED
 
 
 def neutralize(text: str) -> str:

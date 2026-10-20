@@ -6,7 +6,7 @@ model settings come from the environment / .env, exactly as for the API and work
 
 Creates the fictional company "Northwind Aerial Robotics (fictional)" from eval/corpus.py:
 users admin@, manager@, employee@, finance@ and contractor@demo.example.com (org admin,
-knowledge manager, three employees), three workspaces with memberships, and 18 synthetic
+knowledge manager, three employees), three workspaces with memberships, and 20 synthetic
 documents uploaded through the documents service. One document is restricted and granted
 to finance@ only; employee@ cannot read it. Uploads are enqueued on the normal ingestion
 queue for the worker; --inline runs the same ingestion jobs here instead (it loads the

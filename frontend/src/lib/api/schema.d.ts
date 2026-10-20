@@ -621,6 +621,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{document_id}/flagged-text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Flagged Text
+         * @description Let the document's text addressed to AI assistants into answers (`included`:
+         *     true), or keep it out again (false, the default after every indexing). Document
+         *     managers only; 409 when the indexed version has no flagged text.
+         */
+        put: operations["set_flagged_text_api_v1_documents__document_id__flagged_text_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{document_id}/permissions": {
         parameters: {
             query?: never;
@@ -1024,6 +1046,22 @@ export interface components {
             /** Document Ids */
             document_ids?: string[] | null;
         };
+        /**
+         * ChunkFlag
+         * @description A range of the chunk's content (Unicode code points) addressed to AI assistants.
+         */
+        ChunkFlag: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            rule: components["schemas"]["FlagRule"];
+            /**
+             * Page
+             * @description Where the range starts (PDFs).
+             */
+            page?: number | null;
+        };
         /** ChunkOut */
         ChunkOut: {
             /**
@@ -1045,6 +1083,10 @@ export interface components {
             heading_path?: string | null;
             /** Token Count */
             token_count: number;
+            /** Flags */
+            flags?: components["schemas"]["ChunkFlag"][];
+            /** @description The section heading is addressed to AI assistants. */
+            section_flag?: components["schemas"]["FlagRule"] | null;
         };
         /** CitationOut */
         CitationOut: {
@@ -1167,12 +1209,27 @@ export interface components {
             indexed_at?: string | null;
             /** Can Manage */
             can_manage: boolean;
+            /**
+             * Flagged Chunks
+             * @description Chunks of the indexed version holding text addressed to AI assistants.
+             */
+            flagged_chunks: number;
+            /**
+             * Flagged Text Included
+             * @description A document manager let the flagged text into answers; by default it is removed from what the model reads.
+             */
+            flagged_text_included: boolean;
             latest_job?: components["schemas"]["IngestionJobOut"] | null;
             /**
              * Permissions
              * @description Present only for callers who can manage the document.
              */
             permissions?: components["schemas"]["DocumentPermissionOut"][] | null;
+            /**
+             * Flagged Pages
+             * @description Pages holding flagged text (PDFs only).
+             */
+            flagged_pages?: number[];
         };
         /** DocumentOut */
         DocumentOut: {
@@ -1224,6 +1281,16 @@ export interface components {
             indexed_at?: string | null;
             /** Can Manage */
             can_manage: boolean;
+            /**
+             * Flagged Chunks
+             * @description Chunks of the indexed version holding text addressed to AI assistants.
+             */
+            flagged_chunks: number;
+            /**
+             * Flagged Text Included
+             * @description A document manager let the flagged text into answers; by default it is removed from what the model reads.
+             */
+            flagged_text_included: boolean;
         };
         /** DocumentPermissionOut */
         DocumentPermissionOut: {
@@ -1328,6 +1395,24 @@ export interface components {
             workspace?: components["schemas"]["WorkspaceRef"] | null;
             /** Count */
             count: number;
+        };
+        /**
+         * FlagRule
+         * @enum {string}
+         */
+        FlagRule: "addressed" | "override" | "extraction" | "markup";
+        /** FlaggedTextUpdate */
+        FlaggedTextUpdate: {
+            /**
+             * Included
+             * @description Let the flagged text into answers, or keep it out.
+             */
+            included: boolean;
+            /**
+             * Version
+             * @description The document version whose flagged text the manager reviewed. Including fails with 409 version_changed when a newer version has been uploaded since.
+             */
+            version: number;
         };
         /** GroupOut */
         GroupOut: {
@@ -4595,6 +4680,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_flagged_text_api_v1_documents__document_id__flagged_text_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlaggedTextUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentDetail"];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden (missing permission or CSRF token) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found (or not visible to the caller) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

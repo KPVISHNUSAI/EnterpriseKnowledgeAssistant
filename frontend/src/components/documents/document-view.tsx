@@ -16,6 +16,7 @@ import { fileTypeLabel, formatBytes, formatDateTime, formatNumber } from "@/lib/
 import { useDeleteDocument, useDocument, useReindexDocument } from "@/lib/hooks/documents";
 import { intParam, useUrlState } from "@/lib/hooks/url-state";
 import { ExtractedText } from "./extracted-text";
+import { FlaggedTextBadge, FlaggedTextNotice } from "./flagged-text";
 import { RenameDialog } from "./rename-dialog";
 import { ReplaceFileButton } from "./replace-file-button";
 import { SharingEditor } from "./sharing-editor";
@@ -147,6 +148,7 @@ export function DocumentView({ id }: { id: string }) {
             <Badge tone={doc.visibility === "restricted" ? "warning" : "neutral"}>
               {doc.visibility === "restricted" ? "Restricted" : "Workspace-wide"}
             </Badge>
+            <FlaggedTextBadge doc={doc} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -192,6 +194,8 @@ export function DocumentView({ id }: { id: string }) {
         </Alert>
       ) : null}
 
+      <FlaggedTextNotice doc={doc} />
+
       <Metadata doc={doc} />
 
       <Tabs value={tab} onValueChange={(next) => update({ tab: next })}>
@@ -223,6 +227,7 @@ export function DocumentView({ id }: { id: string }) {
             indexedAt={doc.indexed_at ?? null}
             chunkId={chunkId}
             page={page}
+            flaggedIncluded={doc.flagged_text_included}
             onShowInPdf={isPdf ? (target) => update({ tab: "preview", page: target, chunk: null }) : undefined}
           />
         </TabPanel>

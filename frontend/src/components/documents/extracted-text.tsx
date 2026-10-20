@@ -8,6 +8,8 @@ import type { Chunk, DocumentStatus } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { useDocumentChunks } from "@/lib/hooks/documents";
 import { formatNumber } from "@/lib/format";
+import { FLAG_RULE_LABELS } from "@/lib/labels";
+import { FlaggedContent } from "./flagged-text";
 
 const coversPage = (chunk: Chunk, page: number) =>
   chunk.page_number !== null &&
@@ -27,6 +29,7 @@ export function ExtractedText({
   indexedAt,
   chunkId,
   page,
+  flaggedIncluded = false,
   onShowInPdf,
 }: {
   documentId: string;
@@ -36,6 +39,8 @@ export function ExtractedText({
   indexedAt: string | null;
   chunkId?: string;
   page?: number;
+  /** A document manager let the flagged text into answers. */
+  flaggedIncluded?: boolean;
   onShowInPdf?: (page: number) => void;
 }) {
   const hasText = status === "indexed" || chunkCount > 0;
@@ -99,6 +104,7 @@ export function ExtractedText({
           const pageNumber = chunk.page_number;
           const pageChanged = pageNumber !== previous?.page_number;
           const sectionLabel = sectionOf(chunk);
+          const flagRule = chunk.flags?.[0]?.rule ?? chunk.section_flag;
           const sectionChanged = sectionLabel !== sectionOf(previous);
           const highlighted = Boolean(chunkId) && chunk.id === chunkId;
           const isTarget = target?.id === chunk.id;
@@ -120,7 +126,19 @@ export function ExtractedText({
                 </h3>
               ) : null}
               {sectionChanged && sectionLabel ? (
-                <p className="mb-1 text-sm font-medium text-slate-700">{sectionLabel}</p>
+                <p className="mb-1 text-sm font-medium text-slate-700">
+                  {chunk.section_flag ? (
+                    <mark
+                      className="rounded-sm bg-amber-200/70 text-amber-950 ring-1 ring-amber-400"
+                      title={FLAG_RULE_LABELS[chunk.section_flag]}
+                      data-testid="flagged-heading"
+                    >
+                      {sectionLabel}
+                    </mark>
+                  ) : (
+                    sectionLabel
+                  )}
+                </p>
               ) : null}
               <article
                 ref={isTarget ? scrollTo : undefined}
@@ -138,8 +156,16 @@ export function ExtractedText({
                 <p className="mb-1 text-xs text-slate-500">
                   Chunk {chunk.chunk_index + 1} · {formatNumber(chunk.token_count)} tokens
                   {highlighted ? <strong className="ml-2 text-amber-800">Cited passage</strong> : null}
+                  {flagRule ? (
+                    <strong className={cn("ml-2", flaggedIncluded ? "text-red-700" : "text-amber-800")}>
+                      {flaggedIncluded ? "Included in answers" : "Left out of answers"}:{" "}
+                      {FLAG_RULE_LABELS[flagRule].replace(/^./, (first) => first.toLowerCase())}
+                    </strong>
+                  ) : null}
                 </p>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap text-slate-800">{chunk.content}</p>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap text-slate-800">
+                  <FlaggedContent content={chunk.content} flags={chunk.flags ?? []} />
+                </p>
               </article>
             </li>
           );

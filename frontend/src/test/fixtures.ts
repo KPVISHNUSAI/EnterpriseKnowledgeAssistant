@@ -59,6 +59,8 @@ export function makeDocument(overrides: Partial<DocumentItem> = {}): DocumentIte
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
     can_manage: true,
+    flagged_chunks: 0,
+    flagged_text_included: false,
     ...overrides,
   };
 }

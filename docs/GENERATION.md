@@ -67,6 +67,12 @@ searched), `passages`, `citations`, `invalid_citations`, `unverified_quotes`, `p
   assistant turn and a trailing unanswered user turn are dropped (providers require
   alternation). The final user turn carries the user's *original* question, not the
   rewritten search query.
+* Text in a passage that was flagged as addressed to AI assistants arrives as
+  `[Removed: text addressed to AI assistants]`, unless a document manager included it
+  ([ARCHITECTURE.md](ARCHITECTURE.md#text-addressed-to-ai-assistants)). A `title` or
+  `section` attribute that matches a rule is replaced the same way when the prompt is
+  built. The model never sees the flagged text, so the fence is the second layer, not the
+  only one.
 * The prompt is plain text with no provider features, so it works for Claude and for small
   open models (llama3.1:8b through Ollama) alike. Small models follow the citation rules
   less reliably; validation does not depend on the model.
@@ -151,7 +157,8 @@ Deterministic and offline. Passages are split into sentences; each sentence's *c
 is the share of the question's terms it contains, weighted by smoothed inverse passage
 frequency (a term in every passage is weak evidence). Up to three sentences with coverage
 ≥ 0.3 are kept, best first, skipping near-duplicates (≥ 80 % of a sentence's terms already
-in a kept one) and fragments under 20 characters. The answer is a Markdown list, each line
+in a kept one), fragments under 20 characters and sentences that contain the
+`[Removed: ...]` marker for text addressed to AI assistants. The answer is a Markdown list, each line
 citing its source (`- sentence [S2]`); the declared status is `ANSWERED` when the kept
 sentences together cover ≥ 60 % of the question's term weight, else `PARTIAL`; with no
 sentence it abstains. The text is produced in the same `STATUS:` contract and streamed in

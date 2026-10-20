@@ -9,18 +9,20 @@ tables are atomic up to CHUNK_MAX_TOKENS - so one may extend a chunk past the ta
 stay with the text that introduces it - and larger ones are split on line boundaries,
 re-fenced (code) or repeating the header row (tables). Consecutive chunks of a section
 share about CHUNK_OVERLAP_TOKENS of whole trailing sentences; `metadata.overlap_chars`
-says how many leading characters repeat the previous chunk. Token counts come from
-app/ingestion/tokens.py.
+says how many leading characters repeat the previous chunk. Text addressed to AI
+assistants (app/ingestion/instructions.py) is found per block and kept as character
+ranges in `metadata.flags`. Token counts come from app/ingestion/tokens.py.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import groupby
 from typing import Any
 
+from app.ingestion.instructions import Flag, find_instructions
 from app.ingestion.tokens import count_tokens
 from app.ingestion.types import HEADING_SEPARATOR, Block, BlockKind, Chunk
 
@@ -44,6 +46,7 @@ class _Unit:
     block: int  # index of the source block; a block's units are contiguous
     kind: BlockKind
     page: int | None
+    flags: tuple[Flag, ...] = ()  # ranges of `text`
 
     @property
     def prose(self) -> bool:
@@ -65,6 +68,19 @@ def chunk_blocks(
     return chunks
 
 
+def flagged_pages(chunks: Iterable[tuple[dict[str, Any], int | None]]) -> list[int]:
+    """Pages holding text or a heading flagged as addressed to AI assistants, from each
+    chunk's (metadata, page_number)."""
+    pages: set[object] = set()
+    for metadata, page in chunks:
+        flags = metadata.get("flags")
+        for flag in flags if isinstance(flags, list) else []:
+            pages.add(flag.get("page") if isinstance(flag, dict) else None)
+        if metadata.get("section_flag"):
+            pages.add(page)
+    return sorted(page for page in pages if isinstance(page, int))
+
+
 def embedding_text(document_title: str, chunk: Chunk) -> str:
     """What the embedding model sees: a contextual header (document title + heading path)
     and the passage, so a short passage keeps its context. Only the passage is stored."""
@@ -79,18 +95,47 @@ def embedding_text(document_title: str, chunk: Chunk) -> str:
 
 
 def _units(block: Block, index: int, target: int, max_tokens: int) -> list[_Unit]:
-    if block.kind in _VERBATIM:
-        fits = count_tokens(block.text) <= max_tokens
-        pieces = [block.text] if fits else _split_verbatim(block, max_tokens)
+    # PDF extraction has already rejoined wrapped lines, so its line breaks end paragraphs.
+    by_line = block.kind is not BlockKind.PARAGRAPH
+    wrapped = not by_line and block.page_number is not None
+    if block.kind in _VERBATIM and count_tokens(block.text) > max_tokens:
+        # The pieces repeat header lines, so they are no longer slices of the block.
+        pieces = _split_verbatim(block, max_tokens)
+        flags = [tuple(find_instructions(piece, by_line=True)) for piece in pieces]
     else:
-        pieces = [
-            piece
-            for segment in _split_after(block.text, _SEGMENT_END)
-            for piece in _fit(segment, target)
-        ]
+        if block.kind in _VERBATIM:
+            pieces = [block.text]
+        else:
+            pieces = [
+                piece
+                for segment in _split_after(block.text, _SEGMENT_END)
+                for piece in _fit(segment, target)
+            ]
+        flags = _slice_flags(
+            find_instructions(block.text, by_line=by_line, wrapped=wrapped), pieces
+        )
     return [
-        _Unit(p, count_tokens(p), index, block.kind, block.page_number) for p in pieces if p.strip()
+        _Unit(p, count_tokens(p), index, block.kind, block.page_number, f)
+        for p, f in zip(pieces, flags, strict=True)
+        if p.strip()
     ]
+
+
+def _slice_flags(flags: Sequence[Flag], pieces: Sequence[str]) -> list[tuple[Flag, ...]]:
+    """`flags` (ranges of the pieces joined) as ranges of each piece."""
+    sliced = []
+    start = 0
+    for piece in pieces:
+        end = start + len(piece)
+        sliced.append(
+            tuple(
+                Flag(max(f.start, start) - start, min(f.end, end) - start, f.rule)
+                for f in flags
+                if f.start < end and f.end > start
+            )
+        )
+        start = end
+    return sliced
 
 
 def _split_after(text: str, pattern: re.Pattern[str]) -> list[str]:
@@ -136,16 +181,27 @@ def _split_verbatim(block: Block, limit: int) -> list[str]:
     current: list[str] = []
     size = 0
     for line in lines:
-        for part in _fit(line, budget):  # a single over-long line is broken at words
+        # A single over-long line is broken at words; within a piece its words stay on one
+        # line, so the piece's lines can still be checked one by one for instructions.
+        continued = False
+        for part in _fit(line, budget):
             tokens = count_tokens(part)
             if current and size + tokens > budget:
                 pieces.append(current)
-                current, size = [], 0
-            current.append(part.rstrip() if part.strip() else part)
+                current, size, continued = [], 0, False
+            if continued:
+                current[-1] += part
+            else:
+                current.append(part)
+            continued = True
             size += tokens
     if current:
         pieces.append(current)
-    return ["\n".join([*head, *piece, *tail]) + "\n" for piece in pieces]
+    return [
+        "\n".join([*head, *(line.rstrip() if line.strip() else line for line in piece), *tail])
+        + "\n"
+        for piece in pieces
+    ]
 
 
 # --- Packing ------------------------------------------------------------------------------
@@ -201,24 +257,48 @@ class _Packer:
         return self.done
 
 
-def _join(units: Sequence[_Unit]) -> str:
+def _join(units: Sequence[_Unit]) -> tuple[str, list[Flag]]:
+    """The units' text, and their flags as ranges of it (touching ranges merged)."""
     out = ""
+    flags: list[Flag] = []
     previous: _Unit | None = None
     for unit in units:
         if previous is not None and unit.block != previous.block:
             lists = unit.kind is BlockKind.LIST and previous.kind is BlockKind.LIST
-            out = out.rstrip() + ("\n" if lists else "\n\n")
+            out = out.rstrip()
+            flags = [f._replace(end=min(f.end, len(out))) for f in flags]
+            out += "\n" if lists else "\n\n"
+        for flag in unit.flags:
+            start, end = len(out) + flag.start, len(out) + flag.end
+            if flags and flags[-1].end >= start:
+                flags[-1] = flags[-1]._replace(end=max(flags[-1].end, end))
+            else:
+                flags.append(Flag(start, end, flag.rule, unit.page))
         out += unit.text
         previous = unit
-    return out.strip()
+    text = out.strip()
+    shift = len(out) - len(out.lstrip())
+    flags = [
+        f._replace(start=max(f.start - shift, 0), end=min(f.end - shift, len(text))) for f in flags
+    ]
+    return text, [f for f in flags if f.start < f.end]
 
 
 def _make_chunk(units: list[_Unit], carried: int, path: tuple[str, ...]) -> Chunk:
-    content = _join(units)
+    content, flags = _join(units)
     pages = [unit.page for unit in units if unit.page is not None]
     metadata: dict[str, Any] = {"kinds": sorted({unit.kind.value for unit in units})}
     if carried:
-        metadata["overlap_chars"] = len(_join(units[:carried]))
+        metadata["overlap_chars"] = len(_join(units[:carried])[0])
+    if flags:
+        metadata["flags"] = [
+            {key: value for key, value in flag._asdict().items() if value is not None}
+            for flag in flags
+        ]
+    # The heading is not part of the text but names the passage to the model
+    # (app/rag/prompts.py checks it again), so readers are told about it too.
+    if path and (heading := find_instructions(path[-1])):
+        metadata["section_flag"] = heading[0].rule.value
     return Chunk(
         content=content,
         token_count=count_tokens(content),

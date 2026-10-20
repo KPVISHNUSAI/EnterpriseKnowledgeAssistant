@@ -1,5 +1,7 @@
 """Context construction: ranked candidates -> the labelled passages (S1..Sn) that are
-given to the language model and that citations must refer to."""
+given to the language model and that citations must refer to. Text addressed to AI
+assistants (chunk metadata "flags", app/ingestion/instructions.py) is replaced by
+REMOVED unless a document manager included it."""
 
 from __future__ import annotations
 
@@ -15,17 +17,20 @@ from app.rag.types import Candidate, ContextPassage
 # nothing: exact copies, near copies (a word changed) and text inside a merged passage.
 _NEAR_DUPLICATE = 0.9
 _WORD = re.compile(r"\w+")
+REMOVED = "[Removed: text addressed to AI assistants]"
 
 
 def build_context(candidates: Sequence[Candidate], *, max_tokens: int) -> list[ContextPassage]:
-    """Merge each document's consecutive overlapping chunks into one passage, drop
-    (near) duplicates, then fill the token budget in rank order, skipping passages that
-    do not fit. Text is exact document text; the prompt layer is responsible for fencing."""
+    """Merge each document's consecutive overlapping chunks into one passage, remove
+    flagged text, drop (near) duplicates, then fill the token budget in rank order,
+    skipping passages that do not fit. Otherwise text is exact document text; the prompt
+    layer is responsible for fencing."""
     passages: list[ContextPassage] = []
     kept: list[frozenset[tuple[str, ...]]] = []
     used = 0
     for primary, run in _runs(candidates):
-        text, tokens = _merged(run)
+        text, tokens, flagged = _merged(run)
+        text = _without(text, flagged)
         shingles = _shingles(text)
         if any(len(shingles & other) >= _NEAR_DUPLICATE * len(shingles) for other in kept):
             continue
@@ -67,16 +72,57 @@ def _runs(candidates: Sequence[Candidate]) -> list[tuple[Candidate, list[Candida
     return sorted(with_primary, key=lambda item: rank[item[0].chunk_id])
 
 
-def _merged(run: list[Candidate]) -> tuple[str, int]:
-    """The run's text with each overlap included once, and its estimated token count."""
+def _merged(run: list[Candidate]) -> tuple[str, int, list[tuple[int, int]]]:
+    """The run's text with each overlap included once, its estimated token count (of the
+    whole text: flagged text removed later only makes it shorter), and the ranges of it
+    to remove."""
     text, tokens = run[0].content, run[0].token_count
+    flagged = _flagged(run[0], 0)
     for previous, chunk in pairwise(run):
         overlap = _overlap(previous, chunk)
+        flagged += _flagged(chunk, len(text) - overlap)
         text += chunk.content[overlap:]
         # Chunk token counts include the overlap; count only the chunk's new share.
         new_share = (len(chunk.content) - overlap) / len(chunk.content)
         tokens += math.ceil(chunk.token_count * new_share)
-    return text, tokens
+    return text, tokens, flagged
+
+
+def _flagged(chunk: Candidate, offset: int) -> list[tuple[int, int]]:
+    """The chunk's flagged ranges, moved by `offset`. A malformed range removes the whole
+    chunk: these ranges keep instructions away from the model, so they fail closed."""
+    if chunk.include_flagged:
+        return []
+    flags: object = chunk.metadata.get("flags", [])
+    ranges = []
+    for flag in flags if isinstance(flags, list) else [None]:
+        start, end = _range(flag, len(chunk.content)) or (0, len(chunk.content))
+        ranges.append((offset + start, offset + end))
+    return ranges
+
+
+def _range(flag: object, length: int) -> tuple[int, int] | None:
+    start = flag.get("start") if isinstance(flag, dict) else None
+    end = flag.get("end") if isinstance(flag, dict) else None
+    if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= length:
+        return start, end
+    return None
+
+
+def _without(text: str, ranges: list[tuple[int, int]]) -> str:
+    """`text` with each run of overlapping or touching ranges replaced by one REMOVED."""
+    pieces: list[str] = []
+    position = 0
+    for start, end in sorted(ranges):
+        if end <= position:
+            continue
+        if start <= position and pieces:
+            position = end  # extends the range just removed
+            continue
+        pieces += [text[position:start], REMOVED]
+        position = end
+    pieces.append(text[position:])
+    return "".join(pieces)
 
 
 def _overlap(previous: Candidate, chunk: Candidate) -> int:

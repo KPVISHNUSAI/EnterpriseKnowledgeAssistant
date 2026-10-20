@@ -1,4 +1,4 @@
-"""The synthetic corpus: a fictional company, its people, workspaces and 18 documents.
+"""The synthetic corpus: a fictional company, its people, workspaces and 20 documents.
 
 Sources live in eval/sources/. Markdown and text documents are uploaded as written; PDF
 and DOCX documents are generated here from a Markdown source (`*.pdf.md`, `*.docx.md`)
@@ -115,6 +115,8 @@ DOCUMENTS = (
     Doc(
         "suppliers", "supplier-onboarding-checklist.txt", "Supplier Onboarding Checklist", "people"
     ),
+    Doc("invoice-4471", "supplier-invoice-4471.pdf.md", "Supplier Invoice 4471", "people"),
+    Doc("ai-policy", "ai-acceptable-use-policy.md", "AI Acceptable Use Policy", "people"),
     Doc(
         "exec-comp",
         "executive-compensation-2026.docx.md",

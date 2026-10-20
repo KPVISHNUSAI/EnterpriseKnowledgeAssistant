@@ -283,9 +283,13 @@ def _in_scope(scope: SearchScope) -> ColumnElement[bool]:
 
 
 def _with_documents(hits: Subquery) -> Select[Any]:
-    return select(hits, Document.title, Document.workspace_id, Document.mime_type).join(
-        Document, Document.id == hits.c.document_id
-    )
+    return select(
+        hits,
+        Document.title,
+        Document.workspace_id,
+        Document.mime_type,
+        Document.flagged_text_included,
+    ).join(Document, Document.id == hits.c.document_id)
 
 
 def _candidate(row: Row[Any], **evidence: Any) -> Candidate:
@@ -304,6 +308,7 @@ def _candidate(row: Row[Any], **evidence: Any) -> Candidate:
         section_title=row.section_title,
         heading_path=row.heading_path,
         metadata=row.chunk_metadata or {},
+        include_flagged=row.flagged_text_included,
         **evidence,
     )
 

@@ -21,6 +21,7 @@ import type { DocumentItem, DocumentSort, SortOrder } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { fileTypeLabel, formatBytes } from "@/lib/format";
 import { useDeleteDocument, useReindexDocument } from "@/lib/hooks/documents";
+import { FlaggedTextBadge } from "./flagged-text";
 import { StatusBadge } from "./status-badge";
 
 function SortHeader({
@@ -196,6 +197,7 @@ export function DocumentsTable({
               <td className="px-3 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusBadge status={doc.processing_status} error={doc.processing_error} />
+                  <FlaggedTextBadge doc={doc} />
                   {doc.processing_status === "failed" && doc.can_manage ? (
                     <Button
                       size="sm"

@@ -17,6 +17,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from eval.dataset import DEFAULT_VERSION
 from eval.report import REPORTS, write_report
 
 CACHE = Path(__file__).parent / ".cache"
@@ -62,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         extractive=not args.no_extractive,
         llm_configs=llm_configs,
         command_line=shlex.join(["uv", "run", "python", "-m", "eval", *(argv or sys.argv[1:])]),
+        include_flagged=args.include_flagged,
     )
     print(path)
     return 0
@@ -86,7 +88,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument("--name", default=date.today().isoformat(), help="results directory name")
-    run.add_argument("--dataset", default="v1", help="dataset version in eval/datasets/")
+    run.add_argument("--dataset", default=DEFAULT_VERSION, help="dataset version in eval/datasets/")
     run.add_argument("--no-retrieval", action="store_true", help="skip the retrieval evaluation")
     run.add_argument("--no-extractive", action="store_true", help="skip the extractive generator")
     run.add_argument(
@@ -106,6 +108,12 @@ def _parser() -> argparse.ArgumentParser:
         help=f"OpenAI-compatible base URL (default {DEFAULT_LLM_BASE_URL})",
     )
     run.add_argument("--cases", default="", help="only these case ids, comma-separated")
+    run.add_argument(
+        "--include-flagged",
+        action="store_true",
+        help="let text addressed to AI assistants into answers (the quarantine off), to "
+        "measure what removing it changes",
+    )
     run.add_argument("--limit", type=int, default=0, help="only the first N cases")
     report = commands.add_parser("report", help="regenerate report.md from the JSON results")
     report.add_argument("--name", required=True, help="results directory name")

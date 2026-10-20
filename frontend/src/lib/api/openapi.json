@@ -3004,6 +3004,100 @@
         }
       }
     },
+    "/api/v1/documents/{document_id}/flagged-text": {
+      "put": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Set Flagged Text",
+        "description": "Let the document's text addressed to AI assistants into answers (`included`:\ntrue), or keep it out again (false, the default after every indexing). Document\nmanagers only; 409 when the indexed version has no flagged text.",
+        "operationId": "set_flagged_text_api_v1_documents__document_id__flagged_text_put",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlaggedTextUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden (missing permission or CSRF token)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (or not visible to the caller)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/documents/{document_id}/permissions": {
       "put": {
         "tags": [
@@ -4420,6 +4514,41 @@
         "title": "ChatScope",
         "description": "Restrict retrieval to these workspaces/documents (intersected with access)."
       },
+      "ChunkFlag": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/FlagRule"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page",
+            "description": "Where the range starts (PDFs)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "rule"
+        ],
+        "title": "ChunkFlag",
+        "description": "A range of the chunk's content (Unicode code points) addressed to AI assistants."
+      },
       "ChunkOut": {
         "properties": {
           "id": {
@@ -4482,6 +4611,24 @@
           "token_count": {
             "type": "integer",
             "title": "Token Count"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/ChunkFlag"
+            },
+            "type": "array",
+            "title": "Flags"
+          },
+          "section_flag": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlagRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The section heading is addressed to AI assistants."
           }
         },
         "type": "object",
@@ -4773,6 +4920,16 @@
             "type": "boolean",
             "title": "Can Manage"
           },
+          "flagged_chunks": {
+            "type": "integer",
+            "title": "Flagged Chunks",
+            "description": "Chunks of the indexed version holding text addressed to AI assistants."
+          },
+          "flagged_text_included": {
+            "type": "boolean",
+            "title": "Flagged Text Included",
+            "description": "A document manager let the flagged text into answers; by default it is removed from what the model reads."
+          },
           "latest_job": {
             "anyOf": [
               {
@@ -4797,6 +4954,14 @@
             ],
             "title": "Permissions",
             "description": "Present only for callers who can manage the document."
+          },
+          "flagged_pages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Flagged Pages",
+            "description": "Pages holding flagged text (PDFs only)."
           }
         },
         "type": "object",
@@ -4816,7 +4981,9 @@
           "visibility",
           "created_at",
           "updated_at",
-          "can_manage"
+          "can_manage",
+          "flagged_chunks",
+          "flagged_text_included"
         ],
         "title": "DocumentDetail"
       },
@@ -4930,6 +5097,16 @@
           "can_manage": {
             "type": "boolean",
             "title": "Can Manage"
+          },
+          "flagged_chunks": {
+            "type": "integer",
+            "title": "Flagged Chunks",
+            "description": "Chunks of the indexed version holding text addressed to AI assistants."
+          },
+          "flagged_text_included": {
+            "type": "boolean",
+            "title": "Flagged Text Included",
+            "description": "A document manager let the flagged text into answers; by default it is removed from what the model reads."
           }
         },
         "type": "object",
@@ -4949,7 +5126,9 @@
           "visibility",
           "created_at",
           "updated_at",
-          "can_manage"
+          "can_manage",
+          "flagged_chunks",
+          "flagged_text_included"
         ],
         "title": "DocumentOut"
       },
@@ -5238,6 +5417,36 @@
           "count"
         ],
         "title": "FindingOut"
+      },
+      "FlagRule": {
+        "type": "string",
+        "enum": [
+          "addressed",
+          "override",
+          "extraction",
+          "markup"
+        ],
+        "title": "FlagRule"
+      },
+      "FlaggedTextUpdate": {
+        "properties": {
+          "included": {
+            "type": "boolean",
+            "title": "Included",
+            "description": "Let the flagged text into answers, or keep it out."
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "The document version whose flagged text the manager reviewed. Including fails with 409 version_changed when a newer version has been uploaded since."
+          }
+        },
+        "type": "object",
+        "required": [
+          "included",
+          "version"
+        ],
+        "title": "FlaggedTextUpdate"
       },
       "GroupOut": {
         "properties": {

@@ -32,7 +32,7 @@ from typing import Any
 import httpx
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -41,7 +41,7 @@ from sqlalchemy.pool import NullPool
 from app.core.config import BACKEND_DIR, REPO_ROOT, Settings, get_settings
 from app.core.logging import configure_logging
 from app.db.session import get_sessionmaker, set_tenant
-from app.models import DocumentChunk
+from app.models import Document, DocumentChunk
 from app.providers.embeddings.sentence_transformers import resolve_device
 from app.providers.llm import LLMMessage, LLMProvider, LLMRequest, LLMResponse, LLMStreamEvent
 from app.providers.registry import get_embedder, get_llm, get_reranker
@@ -499,6 +499,12 @@ def _answer_row(
         "missing_facts": [fact for fact in case.key_facts if not metrics.matches(text, fact)],
         "forbidden_hits": [fact for fact in case.forbidden_facts if metrics.matches(text, fact)],
         "canary_hits": metrics.canary_hits(text, case.canaries, result.invalid_citations),
+        # Injected text the model was given at all (app/rag/context.py removes flagged text).
+        "injected_in_context": (
+            [c for c in case.canaries if any(metrics.matches(p.text, c) for p in result.passages)]
+            if case.expected == "must_not_follow_injection"
+            else []
+        ),
         "faithfulness": (
             metrics.faithfulness(text, result.question, passage_text) if judged else None
         ),
@@ -602,6 +608,7 @@ def _generation_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "injection": {
             "cases": len(injection),
             "resisted": metrics.mean(not row["canary_hits"] for row in injection),
+            "in_context": sum(bool(row["injected_in_context"]) for row in injection),
             "hits": dict(Counter(hit for row in injection for hit in row["canary_hits"])),
         },
         "permission": {
@@ -649,9 +656,12 @@ def run(
     extractive: bool,
     llm_configs: Sequence[str],
     command_line: str,
+    include_flagged: bool = False,
 ) -> Path:
     """Run what was asked, write one JSON file per part into reports/<name>/ and
-    regenerate report.md from every JSON file there."""
+    regenerate report.md from every JSON file there. `include_flagged` lets every
+    document's text addressed to AI assistants into answers, as a document manager can,
+    to measure what removing it changes."""
     settings = get_settings()
     out_dir = report.REPORTS / name
     provision_database(
@@ -661,6 +671,10 @@ def run(
     )
     configure_logging(settings.log_level, settings.log_format)  # after alembic's fileConfig
     index = build_index(settings, cases)
+    if include_flagged:
+        with index.session() as db:
+            db.execute(update(Document).values(flagged_text_included=True))
+            db.commit()
     header = {
         "command": command_line,
         "dataset": dataset_version,
@@ -668,6 +682,7 @@ def run(
         "environment": environment(settings),
         "settings": pinned_settings(settings),
         "index": index.description,
+        "flagged_text_included": include_flagged,
     }
     if retrieval:
         _write(

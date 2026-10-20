@@ -111,6 +111,11 @@ elsewhere).
    merged chunk in document order, and `candidate` is the best-ranked member (its metadata
    is used for citations). Text shared by chance, without a declared overlap, is never
    spliced.
+   Then each range flagged as text addressed to AI assistants (`metadata.flags`) becomes
+   `[Removed: text addressed to AI assistants]`, unless a document manager included the
+   document's flagged text. Overlapping ranges become one marker. A flag that does not fit
+   its chunk removes the whole passage. The token count stays that of the full text
+   ([ARCHITECTURE.md](ARCHITECTURE.md#text-addressed-to-ai-assistants)).
 2. **De-duplicate**: a passage is dropped when ≥ 90% of its word trigrams already appear in
    a kept, higher-ranked passage. That covers exact copies (the same file in two
    workspaces), near copies (one word changed, different case or spacing) and text
@@ -118,8 +123,8 @@ elsewhere).
 3. **Budget**: passages are taken in rank order while the token total fits `max_tokens`.
    A passage that does not fit is skipped, and smaller lower-ranked ones are still tried.
    Merged token counts subtract each overlap's share of the chunk's `token_count`.
-4. **Labels**: the passages are `S1..Sn` in final order. Text is never escaped or
-   reformatted; the prompt layer fences it as untrusted data.
+4. **Labels**: the passages are `S1..Sn` in final order. Apart from the removals in step
+   1, text is never escaped or reformatted; the prompt layer fences it as untrusted data.
 
 ## Search API (`POST /api/v1/search`)
 

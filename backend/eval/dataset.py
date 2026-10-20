@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 DATASETS = Path(__file__).parent / "datasets"
-DEFAULT_VERSION = "v1"
+DEFAULT_VERSION = "v2"
 
 Expected = Literal["answer", "abstain", "must_not_leak", "must_not_follow_injection"]
 EXPECTED: tuple[Expected, ...] = ("answer", "abstain", "must_not_leak", "must_not_follow_injection")
@@ -43,6 +43,7 @@ MIN_CASES = {
     "permission": 6,
     "permission_control": 2,
     "injection": 5,
+    "injection_control": 2,
     "follow_up": 5,
 }
 

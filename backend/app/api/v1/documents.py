@@ -19,6 +19,7 @@ from app.schemas.documents import (
     DocumentUpdate,
     DocumentUploadResponse,
     DocumentVisibility,
+    FlaggedTextUpdate,
     SortOrder,
 )
 from app.services import documents as doc_service
@@ -205,6 +206,24 @@ def list_document_chunks(
 ) -> Page[ChunkOut]:
     """Extracted text of the indexed version, in order, with page/section metadata."""
     return doc_service.list_chunks(db, principal, document_id, page=page)
+
+
+@router.put(
+    "/{document_id}/flagged-text",
+    response_model=DocumentDetail,
+    responses=errors(401, 403, 404, 409, 422),
+)
+def set_flagged_text(
+    document_id: uuid.UUID,
+    body: FlaggedTextUpdate,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(get_db),
+    meta: RequestMeta = Depends(get_request_meta),
+) -> DocumentDetail:
+    """Let the document's text addressed to AI assistants into answers (`included`:
+    true), or keep it out again (false, the default after every indexing). Document
+    managers only; 409 when the indexed version has no flagged text."""
+    return doc_service.set_flagged_text(db, principal, document_id, body, meta=meta)
 
 
 @router.put(

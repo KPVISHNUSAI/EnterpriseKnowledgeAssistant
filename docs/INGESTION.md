@@ -86,9 +86,18 @@ Running the worker), not by this budget.
 * Code blocks and tables are atomic up to `CHUNK_MAX_TOKENS`, so a short one stays with
   the sentence that introduces it. Larger ones are split on line boundaries: code pieces
   are re-fenced with the original fence and info string, table pieces repeat the header
-  and delimiter rows. Overlap never repeats code or tables.
+  and delimiter rows. A single line too long for a piece is broken at words, and its words
+  stay on one line within each piece. Overlap never repeats code or tables.
 * Each chunk's `metadata` is `{"kinds": [...block kinds...]}` plus `"overlap_chars": n`
   when its first `n` characters repeat the previous chunk.
+* Text addressed to AI assistants is flagged block by block before packing
+  (`app/ingestion/instructions.py`; see
+  [ARCHITECTURE.md](ARCHITECTURE.md#text-addressed-to-ai-assistants)). The flags travel
+  with their text into `metadata["flags"]` as `{"start", "end", "rule", "page"?}`, in
+  code points of `content`. Overlap repeats them, and a flag split between two chunks is
+  in both. An oversized code block or table is checked piece by piece after splitting.
+  A section heading that matches a rule sets `metadata["section_flag"]` to the rule on
+  every chunk of its section.
 
 **Token estimate.** `app/ingestion/tokens.py` estimates WordPiece/BPE tokens without a
 tokenizer: punctuation and CJK characters count one each, letter runs of up to six
@@ -150,8 +159,12 @@ Indexing replaces the document's chunks in one transaction:
 2. Check the fencing token (the job is still `running` with the claimed `attempts`) and
    the version (`documents.version` still equals `ingestion_jobs.document_version`).
 3. Delete the old chunks, insert the new ones (bulk), set the document `indexed` with
-   `chunk_count`, `page_count`, `embedding_model`, `indexed_at`, and finish the job with
-   its metrics.
+   `chunk_count`, `page_count`, `embedding_model`, `indexed_at` and `flagged_chunks`, and
+   finish the job with its metrics.
+   * Indexing resets `flagged_text_included` to false, so a manager's earlier decision to
+     include flagged text does not carry over to new text.
+   * When anything is flagged, the run records `document.instructions_flagged` in the
+     audit log, with the version, the count and the pages.
 
 Until that commit the previous chunks stay searchable, including when a re-index or a
 new version fails (the document is then `failed` with `processing_error`, but its old
@@ -166,7 +179,7 @@ chunks remain). Retrieval must therefore not filter on `processing_status`.
 | `embedding`, `embedding_model` | `EMBEDDING_DIMENSIONS` floats, L2-normalized; the embedder's `model_name` |
 | `page_number`, `page_end` | first and last 1-based page of the passage; null for formats without pages |
 | `section_title`, `heading_path` | innermost heading; full path joined with `" > "` |
-| `metadata` | `{"kinds": [...], "overlap_chars": n}` (see Chunking) |
+| `metadata` | `{"kinds": [...], "overlap_chars": n, "flags": [...], "section_flag": rule}` (see Chunking) |
 
 ## Job state machine
 
@@ -306,7 +319,8 @@ titles or credentials): `ingestion.succeeded`, `ingestion.attempt_failed`,
 ```
 cd backend
 EKA_TEST_DB=eka_test_c uv run pytest tests/test_parsers.py tests/test_chunking.py \
-  tests/test_embeddings.py tests/test_ingestion.py tests/test_worker.py tests/test_retention.py
+  tests/test_embeddings.py tests/test_ingestion.py tests/test_worker.py tests/test_retention.py \
+  tests/test_flagged_text.py
 HF_HUB_OFFLINE=1 uv run pytest tests/test_embeddings_model.py -m slow   # real model, local cache
 ```
 

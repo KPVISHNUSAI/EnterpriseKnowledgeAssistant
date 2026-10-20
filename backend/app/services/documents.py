@@ -23,6 +23,7 @@ from app.core.errors import (
 )
 from app.core.filetypes import FILE_TYPE_BY_MIME, MIME_TYPES, FileType
 from app.db.base import utcnow
+from app.ingestion.chunking import flagged_pages
 from app.models import (
     ACTIVE_JOB_STATUSES,
     Document,
@@ -51,6 +52,7 @@ from app.schemas.documents import (
     DocumentUpdate,
     DocumentUploadResponse,
     DocumentVisibility,
+    FlaggedTextUpdate,
     IngestionJobOut,
     SortOrder,
 )
@@ -182,12 +184,26 @@ def _permissions(db: Session, document_id: uuid.UUID) -> list[DocumentPermission
     )
 
 
+def _flagged_pages(db: Session, document_id: uuid.UUID) -> list[int]:
+    rows = db.execute(
+        select(DocumentChunk.chunk_metadata, DocumentChunk.page_number).where(
+            DocumentChunk.document_id == document_id,
+            or_(
+                DocumentChunk.chunk_metadata.has_key("flags"),
+                DocumentChunk.chunk_metadata.has_key("section_flag"),
+            ),
+        )
+    )
+    return flagged_pages((metadata, page) for metadata, page in rows)
+
+
 def _detail(db: Session, principal: Principal, document_id: uuid.UUID) -> DocumentDetail:
     out = _get_out(db, principal, document_id)
     return DocumentDetail(
         **dict(out),
         latest_job=_latest_job(db, document_id),
         permissions=_permissions(db, document_id) if out.can_manage else None,
+        flagged_pages=_flagged_pages(db, document_id) if out.flagged_chunks else [],
     )
 
 
@@ -756,6 +772,44 @@ def download_document(
             else "default-src 'none'; frame-ancestors 'self'"
         )
     return StreamingResponse(body, media_type=content_type, headers=headers)
+
+
+def set_flagged_text(
+    db: Session,
+    principal: Principal,
+    document_id: uuid.UUID,
+    body: FlaggedTextUpdate,
+    *,
+    meta: RequestMeta,
+) -> DocumentDetail:
+    """Let a document's text addressed to AI assistants into answers, or keep it out
+    again. Indexing a new version keeps it out until someone decides again."""
+    doc = access.get_manageable_document(db, principal, document_id, for_update=True)
+    if not doc.flagged_chunks:
+        raise ConflictError(
+            "The indexed version of this document has no flagged text", code="nothing_flagged"
+        )
+    if body.included and body.version != doc.version:
+        raise ConflictError(
+            "A newer version of this document was uploaded; review its flagged text first",
+            code="version_changed",
+        )
+    if doc.flagged_text_included != body.included:
+        doc.flagged_text_included = body.included
+        audit.record(
+            db,
+            AuditAction.DOCUMENT_FLAGGED_TEXT_INCLUDED
+            if body.included
+            else AuditAction.DOCUMENT_FLAGGED_TEXT_EXCLUDED,
+            organization_id=principal.organization_id,
+            actor_user_id=principal.user_id,
+            resource_type="document",
+            resource_id=doc.id,
+            metadata={"version": doc.version, "flagged_chunks": doc.flagged_chunks},
+            meta=meta,
+        )
+    db.commit()
+    return _detail(db, principal, doc.id)
 
 
 def list_chunks(

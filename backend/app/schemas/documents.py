@@ -7,6 +7,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from app.core.filetypes import FileType
+from app.ingestion.instructions import FlagRule
 from app.models import DocumentStatus, JobStatus, PermissionLevel, PrincipalType
 from app.schemas.common import Schema, UserRef
 
@@ -62,6 +63,13 @@ class DocumentOut(Schema):
     updated_at: datetime
     indexed_at: datetime | None = None
     can_manage: bool
+    flagged_chunks: int = Field(
+        description="Chunks of the indexed version holding text addressed to AI assistants."
+    )
+    flagged_text_included: bool = Field(
+        description="A document manager let the flagged text into answers; by default it "
+        "is removed from what the model reads."
+    )
 
 
 class DocumentPermissionOut(BaseModel):
@@ -75,6 +83,9 @@ class DocumentDetail(DocumentOut):
     latest_job: IngestionJobOut | None = None
     permissions: list[DocumentPermissionOut] | None = Field(
         default=None, description="Present only for callers who can manage the document."
+    )
+    flagged_pages: list[int] = Field(
+        default_factory=list, description="Pages holding flagged text (PDFs only)."
     )
 
 
@@ -107,6 +118,23 @@ class DocumentPermissionsUpdate(BaseModel):
     users: list[UserGrant] = Field(default_factory=list, max_length=500)
 
 
+class FlaggedTextUpdate(BaseModel):
+    included: bool = Field(description="Let the flagged text into answers, or keep it out.")
+    version: int = Field(
+        description="The document version whose flagged text the manager reviewed. Including "
+        "fails with 409 version_changed when a newer version has been uploaded since."
+    )
+
+
+class ChunkFlag(BaseModel):
+    """A range of the chunk's content (Unicode code points) addressed to AI assistants."""
+
+    start: int
+    end: int
+    rule: FlagRule
+    page: int | None = Field(default=None, description="Where the range starts (PDFs).")
+
+
 class ChunkOut(Schema):
     id: uuid.UUID
     chunk_index: int
@@ -116,3 +144,7 @@ class ChunkOut(Schema):
     section_title: str | None = None
     heading_path: str | None = None
     token_count: int
+    flags: list[ChunkFlag] = Field(default_factory=list)
+    section_flag: FlagRule | None = Field(
+        default=None, description="The section heading is addressed to AI assistants."
+    )

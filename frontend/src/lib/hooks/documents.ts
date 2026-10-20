@@ -105,6 +105,25 @@ export function useUpdatePermissions(id: string) {
   });
 }
 
+/** Let a document's text addressed to AI assistants into answers, or keep it out again. */
+export function useSetFlaggedText(id: string) {
+  const toast = useToast();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ included, version }: { included: boolean; version: number }) =>
+      api.documents.setFlaggedText(id, included, version),
+    onSuccess: (detail) => {
+      toast.success(
+        detail.flagged_text_included ? "Flagged text included in answers" : "Flagged text removed from answers",
+      );
+      client.setQueryData(keys.document(id), detail);
+      return client.invalidateQueries({ queryKey: keys.documents });
+    },
+    // 409 version_changed: a newer version arrived, so show it before anyone decides again.
+    onError: () => client.invalidateQueries({ queryKey: keys.documents }),
+  });
+}
+
 export function useInvalidateAfterUpload() {
   return useInvalidateDocuments();
 }

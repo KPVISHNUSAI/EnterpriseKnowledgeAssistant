@@ -32,7 +32,7 @@ from app.core.config import get_settings
 from app.core.logging import job_id_var, org_id_var
 from app.core.metrics import INGESTION_JOBS, INGESTION_LATENCY
 from app.db.session import session_scope
-from app.ingestion.chunking import chunk_blocks, embedding_text
+from app.ingestion.chunking import chunk_blocks, embedding_text, flagged_pages
 from app.ingestion.cleaning import clean_blocks
 from app.ingestion.parsers import detect_file_type, parse
 from app.ingestion.types import Chunk, IngestionError
@@ -40,6 +40,8 @@ from app.models import Document, DocumentChunk, DocumentStatus, IngestionJob, Jo
 from app.providers.embeddings import EmbeddingError, EmbeddingProvider
 from app.providers.embeddings import cache as embedding_cache
 from app.providers.registry import get_embedder
+from app.services import audit
+from app.services.audit import AuditAction
 from app.storage import ObjectStorage, StorageError, get_storage
 from app.worker import queue
 
@@ -234,8 +236,9 @@ def _index(
 ) -> JobStatus:
     """Swap in the new chunks - only if this attempt still owns the job and the document
     version is unchanged. Locks the document first, then the job (the order every writer
-    uses)."""
+    uses). Flagged text starts out excluded from answers again: it may have changed."""
     index_started = time.perf_counter()
+    flagged = [c for c in chunks if c.metadata.get("flags") or c.metadata.get("section_flag")]
     with session_scope(claim.organization_id) as db:
         version = db.scalar(
             select(Document.version).where(Document.id == claim.document_id).with_for_update()
@@ -300,9 +303,25 @@ def _index(
                 page_count=page_count,
                 embedding_model=model,
                 indexed_at=func.now(),
+                flagged_chunks=len(flagged),
+                flagged_text_included=False,
             )
             .execution_options(synchronize_session=False)
         )
+        if flagged:
+            audit.record(
+                db,
+                AuditAction.DOCUMENT_INSTRUCTIONS_FLAGGED,
+                organization_id=claim.organization_id,
+                actor_user_id=None,
+                resource_type="document",
+                resource_id=claim.document_id,
+                metadata={
+                    "version": claim.document_version,
+                    "flagged_chunks": len(flagged),
+                    "pages": flagged_pages((c.metadata, c.page_number) for c in flagged),
+                },
+            )
         metrics["timings_ms"]["index"] = round((time.perf_counter() - index_started) * 1000, 1)
         metrics["timings_ms"]["total"] = round((time.monotonic() - started) * 1000, 1)
         _finish(db, claim, JobStatus.SUCCEEDED, metrics=metrics)
@@ -313,6 +332,7 @@ def _index(
         "ingestion.succeeded",
         extra={
             "chunks": len(chunks),
+            "flagged_chunks": len(flagged),
             "cache_hits": metrics["cache_hits"],
             "attempt": claim.attempts,
         },
