@@ -3,6 +3,7 @@ RRF fusion, reranking, timings and the HNSW query shape."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from collections.abc import Iterator
@@ -441,6 +442,17 @@ def test_heading_path_matches_outrank_body_matches(db, factory, tenant):
         "expense policy",
     )
     assert [h.chunk_index for h in hits] == [1, 0]
+
+
+def test_keyword_ties_follow_content_not_random_ids(db, factory, tenant):
+    """Equal scores are ordered by content hash, so re-ingesting the same text gives the
+    same ranking (chunk ids are random per ingest)."""
+    words = ("alpha", "bravo", "delta", "gamma", "kilo", "lima")
+    texts = [f"Travel note {word}." for word in words]
+    hits = _keyword(db, factory, tenant, texts, "travel")
+    assert len({h.keyword_score for h in hits}) == 1
+    by_hash = sorted(texts, key=lambda t: hashlib.sha256(t.encode()).hexdigest())
+    assert [h.content for h in hits] == by_hash
 
 
 def test_query_text_is_never_parsed_as_tsquery_syntax(db, factory, tenant):

@@ -533,12 +533,19 @@ than someone can read.
     and 16 GB of memory. Retrieval was 5 to 40 times slower there than in the retrieval
     run (0.76–0.85 s p50, against 0.02–0.16 s). A deployment with a hosted LLM avoids this
     contention.
-- **Keyword ties are ordered by random chunk UUIDs.** Re-ingesting can reorder chunks
-  with equal `ts_rank_cd`, so keyword and hybrid ranks can move by a position between
-  runs. An earlier run on 2026-10-18 (not kept) built identical chunks (fingerprint
-  `be032925adc7e9eb`) and measured keyword Recall@1 at 0.761; the 2026-10-19 run measured
-  0.746, one case lower. In the 2026-10-20 re-run, again over identical chunks, `tech-03`
-  was back at keyword rank 1, and passages reordered in four hybrid LLM answers.
+- **In the committed runs, keyword ties were ordered by random chunk UUIDs.** Re-ingesting
+  could reorder chunks with equal `ts_rank_cd`, so keyword and hybrid ranks could move by
+  a position between runs. An earlier run on 2026-10-18 (not kept) built identical chunks
+  (fingerprint `be032925adc7e9eb`) and measured keyword Recall@1 at 0.761; the 2026-10-19
+  run measured 0.746, one case lower. In the 2026-10-20 re-run, again over identical
+  chunks, `tech-03` was back at keyword rank 1, and passages reordered in four hybrid LLM
+  answers.
+  - Ties now break by content hash. After that change, two retrieval and extractive runs,
+    each on a fresh ingest, ranked every case identically in all four configurations.
+    Against the 2026-10-20 report, every case kept its evidence ranks and every
+    retrieval and extractive score matched. Only tied chunks moved, which changed the
+    chunks that filled the context in 6 keyword or hybrid cases. These check runs were
+    not kept, and the LLM part was not re-run.
 - **Corpus artifacts.** Every document begins with the required "synthetic" marker line.
   It shares terms with many questions ("policy", the document title), and the extractive
   generator sometimes picks it as an answer sentence.

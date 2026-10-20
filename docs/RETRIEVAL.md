@@ -71,7 +71,8 @@ elsewhere).
   words has no keyword hits.
 * `search_vector @@ query` (GIN index), ranked by `ts_rank_cd(search_vector, query, 1|32)`:
   normalized by chunk length and scaled into 0..1. `search_vector` weights the heading
-  path `A` and the content `B`, so heading matches rank higher. Ties break by chunk id.
+  path `A` and the content `B`, so heading matches rank higher. Ties break by the chunk's
+  content hash, then its id, so re-ingesting the same text gives the same ranking.
 * `matched_terms` = the query lexemes present in the chunk, in query order. They are
   stems (`polici` for "policies"), because that is what matched.
 * The text search configuration is always `settings.fts_config` (a validated identifier

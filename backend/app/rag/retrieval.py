@@ -197,11 +197,15 @@ def keyword_search(db: Session, scope: SearchScope, query: str, *, limit: int) -
     hits = (
         select(*_CHUNK_COLUMNS, score.label("score"), matched.label("matched"))
         .where(DocumentChunk.search_vector.op("@@")(tsquery), _in_scope(scope))
-        .order_by(score.desc(), DocumentChunk.id)
+        # Ties go by content, not by the random chunk id, so re-ingesting the same text
+        # gives the same ranking.
+        .order_by(score.desc(), DocumentChunk.content_hash, DocumentChunk.id)
         .limit(limit)
         .subquery("hits")
     )
-    rows = db.execute(_with_documents(hits).order_by(hits.c.score.desc(), hits.c.id))
+    rows = db.execute(
+        _with_documents(hits).order_by(hits.c.score.desc(), hits.c.content_hash, hits.c.id)
+    )
     return [
         _candidate(
             row,

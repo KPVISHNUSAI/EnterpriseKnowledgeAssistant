@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -445,7 +446,7 @@ class Factory:
                 organization_id=doc.organization_id,
                 chunk_index=index,
                 content=spec["content"],
-                content_hash=uuid.uuid4().hex,
+                content_hash=hashlib.sha256(spec["content"].encode()).hexdigest(),
                 token_count=spec.get("token_count", len(spec["content"].split())),
                 embedding=vector,
                 embedding_model=embedder.model_name,
