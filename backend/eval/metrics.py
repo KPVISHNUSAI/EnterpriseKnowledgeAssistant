@@ -4,45 +4,23 @@ Matching is lexical and deliberately simple, so every score can be recomputed by
 Text is normalized before any comparison: NFKC, case folding, typographic quotes and
 dashes folded to ASCII, thousands separators removed ("1,240" == "1240") and whitespace
 collapsed. Regular-expression facts ("re:...") are matched against that normalized text,
-so they are written in lower case. Sentence splitting and content terms reuse
-app/rag/citations.py, the helpers the application uses for excerpts and the extractive
-generator.
+so they are written in lower case. Normalization and the claim check come from
+app/rag/claims.py, the same code that builds answer receipts.
 """
 
 from __future__ import annotations
 
 import math
 import re
-import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 
-from app.rag.citations import split_sentences, terms
+from app.rag.claims import SUPPORT_SHARE as SUPPORT_SHARE
+from app.rag.claims import Verdict, check_claims
+from app.rag.claims import claims as claims
+from app.rag.claims import normalize as normalize
+from app.rag.claims import supported as supported
 
-SUPPORT_SHARE = 0.5  # a claim's new terms that must appear in the passages it cites
-
-_FOLD = str.maketrans(
-    {
-        "\N{LEFT DOUBLE QUOTATION MARK}": '"',
-        "\N{RIGHT DOUBLE QUOTATION MARK}": '"',
-        "\N{LEFT SINGLE QUOTATION MARK}": "'",
-        "\N{RIGHT SINGLE QUOTATION MARK}": "'",
-        "\N{EN DASH}": "-",
-        "\N{EM DASH}": "-",
-        "\N{MINUS SIGN}": "-",
-    }
-)
-_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
-_MARKER = re.compile(r"\[\s*([sS]\d+(?:\s*[,;]\s*[sS]\d+)*)\s*\]")
-_SOURCE_ID = re.compile(r"[sS]\d+")
 _CANARY_ID = re.compile(r"S\d+")
-_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)*")
-_LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
-_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+(?=[.,;:!?])")
-
-
-def normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text).translate(_FOLD).casefold()
-    return " ".join(_THOUSANDS.sub("", text).split())
 
 
 def matches(text: str, fact: str) -> bool:
@@ -132,65 +110,18 @@ def context_relevance(passages: Sequence[tuple[str, int]], needles: Sequence[str
 # --- Generation ------------------------------------------------------------------------------
 
 
-def claims(answer: str) -> list[tuple[str, tuple[str, ...]]]:
-    """Answer sentences (and list items) with the source ids cited in them. A sentence
-    that is only markers ("[S1]" after the full stop) belongs to the one before it;
-    lead-in lines ending in ":" and fragments of fewer than two terms without a number
-    are not claims."""
-    found: list[tuple[str, tuple[str, ...]]] = []
-    for sentence in split_sentences(answer):
-        ids = tuple(
-            dict.fromkeys(
-                m.upper() for g in _MARKER.findall(sentence) for m in _SOURCE_ID.findall(g)
-            )
-        )
-        text = _SPACE_BEFORE_PUNCTUATION.sub("", _LIST_MARKER.sub("", _MARKER.sub("", sentence)))
-        text = text.strip()
-        if not terms(text) and not _NUMBER.search(normalize(text)):
-            if found and ids:
-                previous, cited = found[-1]
-                found[-1] = (previous, tuple(dict.fromkeys(cited + ids)))
-            continue
-        if text.endswith(":") or (len(terms(text)) < 2 and not _NUMBER.search(normalize(text))):
-            continue
-        found.append((text, ids))
-    return found
-
-
-def supported(claim: str, cited: Sequence[str], question: str) -> bool:
-    """A claim is supported when it cites at least one passage, every number it adds to
-    the question appears in the cited passages, and at least SUPPORT_SHARE of the content
-    terms it adds appear there too."""
-    if not cited:
-        return False
-    claim, question = normalize(claim), normalize(question)
-    evidence = " ".join(normalize(text) for text in cited)
-    asked = set(terms(question))
-    new_numbers = _numbers(claim) - _numbers(question)
-    if not new_numbers <= _numbers(evidence, prefixes=True):
-        return False
-    new_terms = [term for term in terms(claim) if term not in asked]
-    if not new_terms:
-        return True
-    held = set(terms(evidence))
-    return sum(term in held for term in new_terms) / len(new_terms) >= SUPPORT_SHARE
-
-
 def faithfulness(
     answer: str, question: str, passages: Mapping[str, str]
 ) -> dict[str, float | int | None]:
     """Claims, supported claims and uncited claims of one answer; `passages` maps source
     ids to the passage text given to the generator."""
-    found = claims(answer)
-    support = [
-        supported(text, [passages[i] for i in ids if i in passages], question)
-        for text, ids in found
-    ]
+    found = check_claims(answer, question, passages, strict=False)
+    support = sum(claim.verdict is Verdict.SUPPORTED for claim in found)
     return {
         "claims": len(found),
-        "supported": sum(support),
-        "uncited": sum(not ids for _, ids in found),
-        "score": sum(support) / len(found) if found else None,
+        "supported": support,
+        "uncited": sum(claim.verdict is Verdict.UNCITED for claim in found),
+        "score": support / len(found) if found else None,
     }
 
 
@@ -254,14 +185,3 @@ def percentile(values: Sequence[float], q: float) -> float | None:
     position = (len(ordered) - 1) * q / 100
     low, high = math.floor(position), math.ceil(position)
     return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
-
-
-def _numbers(text: str, *, prefixes: bool = False) -> set[str]:
-    """Number tokens of `text`; with `prefixes`, "4.2.0" also yields "4.2" and "4" so a
-    claim about version 4.2 is found in "4.2.0"."""
-    found = set(_NUMBER.findall(normalize(text)))
-    if prefixes:
-        for number in list(found):
-            parts = number.split(".")
-            found.update(".".join(parts[:i]) for i in range(1, len(parts)))
-    return found

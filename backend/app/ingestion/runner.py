@@ -24,7 +24,7 @@ from typing import Any
 
 import redis
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import and_, case, delete, func, insert, or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -303,6 +303,14 @@ def _index(
                 page_count=page_count,
                 embedding_model=model,
                 indexed_at=func.now(),
+                indexed_version=claim.document_version,
+                version_indexed_at=case(
+                    (
+                        Document.indexed_version.is_distinct_from(claim.document_version),
+                        func.now(),
+                    ),
+                    else_=Document.version_indexed_at,
+                ),
                 flagged_chunks=len(flagged),
                 flagged_text_included=False,
             )

@@ -1117,6 +1117,23 @@ export interface components {
              */
             redacted: boolean;
         };
+        /**
+         * ClaimOut
+         * @description One statement of an answer, checked against the passages it cites by words and
+         *     numbers (app/rag/claims.py): evidence that it says what they say, not proof.
+         */
+        ClaimOut: {
+            /** Text */
+            text: string;
+            /** Source Ids */
+            source_ids: string[];
+            verdict: components["schemas"]["Verdict"];
+            /**
+             * Missing Numbers
+             * @description Numbers in the statement that no cited passage has.
+             */
+            missing_numbers?: string[];
+        };
         /** ConversationOut */
         ConversationOut: {
             /**
@@ -1158,6 +1175,28 @@ export interface components {
             recent_conversations: components["schemas"]["ConversationOut"][];
             /** Recent Activity */
             recent_activity: components["schemas"]["ActivityItem"][];
+        };
+        /**
+         * DocumentChange
+         * @description A cited document whose indexed version is newer than the one the answer used.
+         */
+        DocumentChange: {
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /** Document Title */
+            document_title: string;
+            /** Used Version */
+            used_version: number;
+            /** Current Version */
+            current_version: number;
+            /**
+             * Current Since
+             * @description When the current version was first indexed.
+             */
+            current_since?: string | null;
         };
         /** DocumentDetail */
         DocumentDetail: {
@@ -1694,6 +1733,13 @@ export interface components {
             sources?: components["schemas"]["SourceRef"][];
             /** Citations */
             citations?: components["schemas"]["CitationOut"][];
+            /** Claims */
+            claims?: components["schemas"]["ClaimOut"][];
+            /**
+             * Changed Documents
+             * @description Only in conversation history.
+             */
+            changed_documents?: components["schemas"]["DocumentChange"][];
             /**
              * Metadata
              * @description Retrieval summary: search_query, mode, reranked, timings_ms, usage.
@@ -2138,6 +2184,11 @@ export interface components {
             /** Section Title */
             section_title?: string | null;
             /**
+             * Document Version
+             * @description Version of the document the passage came from.
+             */
+            document_version?: number | null;
+            /**
              * Excerpt
              * @description Passage text (null when redacted because access was revoked).
              */
@@ -2287,6 +2338,11 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /**
+         * Verdict
+         * @enum {string}
+         */
+        Verdict: "supported" | "unsupported" | "uncited";
         /** WorkspaceAccessOut */
         WorkspaceAccessOut: {
             /**

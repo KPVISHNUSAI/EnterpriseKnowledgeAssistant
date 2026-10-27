@@ -194,6 +194,62 @@ reads, and the evaluation measures that directly (see
 It does not catch every injection: text that does not match a rule reaches the model as
 before. There it meets the fenced prompt and the rendering rules above.
 
+## Answer receipts
+
+Every answer carries a receipt: what each of its statements rests on, checked by code, and
+the exact document versions it used. Design:
+[2026-10-27-answer-receipts-design.md](superpowers/specs/2026-10-27-answer-receipts-design.md).
+
+* **Statements.** After citation validation, `app/rag/claims.py` splits the answer into
+  statements (sentences and list items, with the sources each cites) and gives each a
+  verdict:
+  * `supported`: every number in it is in the cited passages (version "4.2" is found in
+    "4.2.0"), and so are at least half of the content words it adds to the question, or
+    of all its words when it only restates the question;
+  * `unsupported`: the reason is the missing numbers, or too few words;
+  * `uncited`: it cites no source.
+
+  This is the evaluation's faithfulness check, moved into the application so the product
+  and the evaluation run the same code, with one difference. The evaluation's published
+  rule (`strict=False`) does not look for what a statement takes from the question, so
+  for "Is the retention period 7 years?" it would pass "The retention period is 7 years"
+  against a passage that says 5. Receipts check those numbers and words too. Only
+  answers that make claims are checked
+  (`answered`, `partial`, `unverified`). The verdicts never change the answer's status.
+* **Versions.** `documents.version` counts uploads, but the previous version stays
+  searchable until the new one is indexed. So the ingestion runner records
+  `indexed_version`, and `version_indexed_at` (when that version was first indexed; a
+  re-index keeps the date). Each source of an answer stores the `document_version` its
+  passage came from. Migration 0004 backfills both columns from the ingestion jobs, or,
+  for an indexed document whose jobs retention already removed, from the document
+  itself. Documents mid-replacement whose jobs are gone stay unknown until their next
+  indexing.
+* **Replaced documents.** When history is read, `changed_documents` lists each cited
+  document whose indexed version is now newer than the one the answer used, with the
+  current version and its date. A passage that was retrieved but not cited does not count.
+  The UI shows one line per document: "This answer used version 1 of “Travel Policy”.
+  Version 2 replaced it on <date>", with the date in the browser's locale. Answers stored
+  before versions were recorded never show it.
+* **Who sees what.** Statements quote the answer, so they follow it: withheld when the
+  answer is withheld (`claims` is empty, and so is `changed_documents`), and erased with
+  it when a document the answer drew on is deleted. Change notices are computed only for answers whose documents
+  the reader can read now.
+* **Audit.** `chat.answered` also records the version of each retrieved document and how
+  many statements were checked and matched. These are ids and counts, never text.
+
+**What it shows, and what it does not.** A `supported` statement uses only numbers found
+in its cited passages, and at least half of the words it adds are there too. That
+catches invented figures and statements that share little with the passage they cite. A
+statement can still pass with half of its words unsupported, and the check cannot tell
+that a statement contradicts its passage with the same words ("not required" vs
+"required"). A fact taken only from a heading is reported as not found, because the check
+reads passage text.
+The UI therefore says "matches its source", never "verified". The evaluation measures the
+looser form of the check as faithfulness: 0.89–0.93 for llama3.1:8b, 1.000 for the extractive generator,
+which copies its sentences ([EVALUATION.md](EVALUATION.md)). Not built yet: a
+tamper-evident log of receipts, a printable receipt, and marking statements inside the
+answer text.
+
 ## Sessions, CSRF and request hygiene
 
 * Opaque 256-bit session tokens in an HttpOnly `SameSite=Lax` cookie; only SHA-256 hashes

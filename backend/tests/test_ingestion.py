@@ -317,6 +317,8 @@ def test_reindex_reuses_cached_embeddings(factory, tenant):
     doc = store_document(factory, tenant, GUIDE)
     assert process_job(add_job(doc).id, doc.organization_id) is JobStatus.SUCCEEDED
     before = [(c.content, c.content_hash) for c in chunk_rows(doc)]
+    first = document_row(doc)
+    assert first.indexed_version == 1 and first.version_indexed_at == first.indexed_at
 
     embedder = Embedder()
     job = add_job(doc)  # a reindex of the same version
@@ -324,6 +326,10 @@ def test_reindex_reuses_cached_embeddings(factory, tenant):
     assert embedder.calls == 0  # every vector came from the cache
     assert (job_row(job).metrics["cache_hits"], job_row(job).metrics["cache_misses"]) == (3, 0)
     assert [(c.content, c.content_hash) for c in chunk_rows(doc)] == before
+    again = document_row(doc)
+    # Still version 1, live since its first indexing: answers keep their "current" status.
+    assert again.indexed_at > first.indexed_at
+    assert (again.indexed_version, again.version_indexed_at) == (1, first.version_indexed_at)
 
 
 def test_identical_document_in_another_tenant_is_embedded_again(factory, tenant, other_tenant):
@@ -626,6 +632,7 @@ def test_failed_reindex_keeps_the_previous_chunks(factory, tenant):
     assert [(c.id, c.content) for c in chunk_rows(doc)] == before  # still searchable
     stored = document_row(doc)
     assert (stored.processing_status, stored.chunk_count) == (DocumentStatus.FAILED, 3)
+    assert stored.indexed_version == 1
     assert stored.processing_error == job_row(job).error_message
 
 
@@ -633,6 +640,7 @@ def test_new_version_replaces_the_chunks(factory, tenant, invalidated):
     doc = store_document(factory, tenant, GUIDE)
     assert process_job(add_job(doc).id, doc.organization_id) is JobStatus.SUCCEEDED
     old = {c.content_hash for c in chunk_rows(doc)}
+    v1_since = document_row(doc).version_indexed_at
 
     v2 = GUIDE.split(b"## Accounts")[0] + b"## Equipment\n\nLaptops ship before your first day.\n"
     new_key = doc.storage_key.replace("/v1/", "/v2/")
@@ -655,7 +663,9 @@ def test_new_version_replaces_the_chunks(factory, tenant, invalidated):
     new = {c.content_hash for c in chunks}
     assert len(old & new) == 1  # the unchanged section keeps its hash (and cached vector)
     assert invalidated == [(doc.organization_id, old - new)]
-    assert document_row(doc).chunk_count == 2
+    stored = document_row(doc)
+    assert stored.chunk_count == 2
+    assert stored.indexed_version == 2 and stored.version_indexed_at > v1_since
 
 
 # --- Observability ------------------------------------------------------------------------

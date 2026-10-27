@@ -289,6 +289,7 @@ def _with_documents(hits: Subquery) -> Select[Any]:
         Document.workspace_id,
         Document.mime_type,
         Document.flagged_text_included,
+        Document.indexed_version,
     ).join(Document, Document.id == hits.c.document_id)
 
 
@@ -309,6 +310,7 @@ def _candidate(row: Row[Any], **evidence: Any) -> Candidate:
         heading_path=row.heading_path,
         metadata=row.chunk_metadata or {},
         include_flagged=row.flagged_text_included,
+        document_version=row.indexed_version,
         **evidence,
     )
 

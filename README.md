@@ -30,6 +30,14 @@ it is grounded in or says that the documents do not contain the answer.
   it back in after a warning, and both decisions are audited. The detector can miss, so
   answers still cannot load images or show links that no cited passage contains
   ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#text-addressed-to-ai-assistants)).
+* **Answer receipts.** Each statement of an answer is checked against the passages it
+  cites, by code: every number in it must be in them, and at least half of the words it
+  adds.
+  The receipt under the answer lists each statement, the reason for its verdict and the
+  document versions the answer used. When a cited document is replaced, the old answer
+  says which version it used and when the new one replaced it. The check is lexical, so a
+  match is evidence, not proof
+  ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#answer-receipts)).
 * **Evaluation suite.** Separate retrieval and generation metrics over a synthetic corpus,
   comparing vector-only, hybrid and hybrid + rerank retrieval
   ([docs/EVALUATION.md](docs/EVALUATION.md)).
@@ -515,18 +523,19 @@ Production issues (ALB timeouts, migrations, secrets) are covered in
 
 Tested, with results reported from actual runs:
 
-* **Backend.** 1230 tests: unit tests, and integration tests against PostgreSQL with pgvector
+* **Backend.** 1239 tests: unit tests, and integration tests against PostgreSQL with pgvector
   and Redis. They include the real embedding model and cross-encoder, and a live Ollama
   server for the OpenAI-compatible provider. CI runs everything except the real-model tests
   on every push.
-* **Frontend.** 181 Vitest tests, ESLint, TypeScript and the production build.
-* **End-to-end.** 30 Playwright tests in Chromium against the real stack (API, worker,
+* **Frontend.** 195 Vitest tests, ESLint, TypeScript and the production build.
+* **End-to-end.** 31 Playwright tests in Chromium against the real stack (API, worker,
   frontend, PostgreSQL, Redis). They cover permissions, cross-tenant access, XSS payloads,
-  CSRF, streaming and Stop, the leak test and the quarantine of text addressed to AI
-  assistants. The run also checks that the service logs contain no passwords, keys,
-  document text or questions. The 29 earlier tests all passed in a local run (macOS); the
-  quarantine test passed locally together with the document tests. CI runs all of them
-  on every push.
+  CSRF, streaming and Stop, the leak test, the quarantine of text addressed to AI
+  assistants and answer receipts. The run also checks that the service logs contain no
+  passwords, keys, document text or questions. The 29 earlier tests all passed in a local
+  run (macOS); the quarantine test passed locally together with the document tests, and
+  the receipts test together with the chat, document, permission and streaming tests.
+  CI runs all of them on every push.
 * **Container stack.** The full stack (`make up-app`) was tested by hand: register, upload,
   ingestion, hybrid search with reranking, and a streamed answer with a verified citation.
 * **RAG evaluation**, as described above.
@@ -541,6 +550,12 @@ Tested, with results reported from actual runs:
   not. Its tests break it on purpose in 18 ways backend-side (for example, the context
   builder ignoring flags, a viewer including the text, a stale version being included, a
   heading never checked) and 8 ways in the UI. Each one fails the tests.
+* **Answer receipts.** Its tests break it on purpose in 24 ways backend-side (for example,
+  numbers not checked, a leading question's echo passing, claims surviving a deletion or a
+  withheld answer, a re-index moving the version date, retrieval pinning the latest upload
+  instead of the indexed one, the migration's backfill running under row-level security)
+  and 9 ways in the UI. Each one fails the tests. Moving the claim check out of the
+  evaluation left its results identical on all 1,309 answers in the existing reports.
 
 Not tested:
 

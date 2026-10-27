@@ -31,6 +31,7 @@ from app.providers.embeddings import EmbeddingProvider
 from app.providers.llm import LLMProvider
 from app.providers.rerankers import Reranker
 from app.rag.answer import ERROR_MESSAGE, stream_answer
+from app.rag.claims import Verdict
 from app.rag.query import normalize_query
 from app.rag.types import (
     AnswerCompleted,
@@ -47,6 +48,7 @@ from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
     CitationOut,
+    ClaimOut,
     SourceRef,
     SourceRelevance,
     StreamDoneEvent,
@@ -305,8 +307,10 @@ def _audit_answer(
     history_documents: set[uuid.UUID],
     meta: RequestMeta,
 ) -> None:
-    """Which documents an answer was built from: identifiers only, no text."""
+    """Which documents (and versions) an answer was built from and how many of its
+    statements matched their sources: identifiers and counts only, no text."""
     sources = message.sources or []
+    claims = (message.retrieval_metadata or {}).get("claims", [])
     audit.record(
         db,
         AuditAction.CHAT_ANSWERED,
@@ -320,6 +324,13 @@ def _audit_answer(
             "documents_retrieved": sorted({s["document_id"] for s in sources}),
             "documents_cited": sorted({s["document_id"] for s in sources if s["cited"]}),
             "documents_from_history": sorted(map(str, history_documents)),
+            "document_versions": {
+                s["document_id"]: s["document_version"]
+                for s in sources
+                if s.get("document_version") is not None
+            },
+            "claims": len(claims),
+            "claims_supported": sum(c["verdict"] == Verdict.SUPPORTED for c in claims),
         },
         meta=meta,
     )
@@ -343,6 +354,7 @@ def source_ref(passage: ContextPassage, *, cited: bool) -> SourceRef:
         page_number=c.page_number,
         page_end=c.page_end,
         section_title=c.section_title,
+        document_version=c.document_version,
         excerpt=passage.text,
         relevance=SourceRelevance(
             rerank_score=c.rerank_score,
@@ -371,6 +383,15 @@ def answer_metadata(result: AnswerResult) -> dict[str, Any]:
                 excerpt=c.excerpt,
             ).model_dump(mode="json")
             for c in result.citations
+        ],
+        "claims": [
+            ClaimOut(
+                text=c.text,
+                source_ids=list(c.source_ids),
+                verdict=c.verdict,
+                missing_numbers=list(c.missing_numbers),
+            ).model_dump(mode="json")
+            for c in result.claims
         ],
         "invalid_citations": result.invalid_citations,
         "unverified_quotes": result.unverified_quotes,

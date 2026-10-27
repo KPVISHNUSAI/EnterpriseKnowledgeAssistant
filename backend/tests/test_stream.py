@@ -97,6 +97,7 @@ def test_events_arrive_in_order_and_the_final_message_is_persisted(
     )
     assert [s["cited"] for s in done["sources"]] == [True, False]
     assert done["citations"][0]["source_id"] == "S1"
+    assert [(c["verdict"], c["source_ids"]) for c in done["claims"]] == [("supported", ["S1"])]
 
     set_tenant(db, tenant.org.id)
     rows = {m.id: m for m in db.scalars(select(Message)).all()}

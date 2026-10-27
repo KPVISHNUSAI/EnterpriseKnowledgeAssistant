@@ -130,15 +130,18 @@ def test_persisted_format_and_usage_rows(app, login_as, tenant, handbook, db, mo
         "page_number",
         "page_end",
         "section_title",
+        "document_version",
         "excerpt",
         "relevance",
         "cited",
         "redacted",
     }
     assert assistant.sources[0]["document_id"] == str(handbook.id)
+    assert assistant.sources[0]["document_version"] == 1
     assert set(assistant.retrieval_metadata) >= {
         "answer_status",
         "citations",
+        "claims",
         "invalid_citations",
         "unverified_quotes",
         "search_query",
@@ -300,6 +303,9 @@ def test_answers_and_searches_are_audited_by_document_never_by_text(login_as, te
         "documents_retrieved": [document],
         "documents_cited": [document],
         "documents_from_history": [],
+        "document_versions": {document: 1},
+        "claims": 1,
+        "claims_supported": 1,
     }
     assert searched.actor_user_id == tenant.viewer.id
     assert searched.event_metadata == {"mode": "keyword", "results": 1, "documents": [document]}

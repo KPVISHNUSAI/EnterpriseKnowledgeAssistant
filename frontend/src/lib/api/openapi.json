@@ -4722,6 +4722,40 @@
         ],
         "title": "CitationOut"
       },
+      "ClaimOut": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Ids"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          },
+          "missing_numbers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Numbers",
+            "description": "Numbers in the statement that no cited passage has."
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "source_ids",
+          "verdict"
+        ],
+        "title": "ClaimOut",
+        "description": "One statement of an answer, checked against the passages it cites by words and\nnumbers (app/rag/claims.py): evidence that it says what they say, not proof."
+      },
       "ConversationOut": {
         "properties": {
           "id": {
@@ -4808,6 +4842,49 @@
         ],
         "title": "DashboardResponse",
         "description": "Counts cover only documents the caller can read."
+      },
+      "DocumentChange": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id"
+          },
+          "document_title": {
+            "type": "string",
+            "title": "Document Title"
+          },
+          "used_version": {
+            "type": "integer",
+            "title": "Used Version"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version"
+          },
+          "current_since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Since",
+            "description": "When the current version was first indexed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "document_title",
+          "used_version",
+          "current_version"
+        ],
+        "title": "DocumentChange",
+        "description": "A cited document whose indexed version is newer than the one the answer used."
       },
       "DocumentDetail": {
         "properties": {
@@ -6212,6 +6289,21 @@
             "type": "array",
             "title": "Citations"
           },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimOut"
+            },
+            "type": "array",
+            "title": "Claims"
+          },
+          "changed_documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentChange"
+            },
+            "type": "array",
+            "title": "Changed Documents",
+            "description": "Only in conversation history."
+          },
           "metadata": {
             "additionalProperties": true,
             "type": "object",
@@ -7392,6 +7484,18 @@
             ],
             "title": "Section Title"
           },
+          "document_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Version",
+            "description": "Version of the document the passage came from."
+          },
           "excerpt": {
             "anyOf": [
               {
@@ -7773,6 +7877,15 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "Verdict": {
+        "type": "string",
+        "enum": [
+          "supported",
+          "unsupported",
+          "uncited"
+        ],
+        "title": "Verdict"
       },
       "WorkspaceAccessOut": {
         "properties": {

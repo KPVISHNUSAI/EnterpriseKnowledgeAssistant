@@ -94,6 +94,10 @@ class Document(UUIDPrimaryKey, Timestamps, Base):
     chunk_count: Mapped[int] = mapped_column(default=0)
     embedding_model: Mapped[str | None] = mapped_column(String(255))
     indexed_at: Mapped[datetime | None]
+    # The version whose chunks are searchable (a new upload stays unsearchable until it is
+    # indexed) and when that version was first indexed; re-indexing keeps the date.
+    indexed_version: Mapped[int | None]
+    version_indexed_at: Mapped[datetime | None]
     # Chunks of the indexed version holding text addressed to AI assistants
     # (app/ingestion/instructions.py), and whether a manager let that text into answers.
     flagged_chunks: Mapped[int] = mapped_column(default=0, server_default=text("0"))

@@ -14,8 +14,15 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
-from app.models import Conversation, Message
-from app.schemas.chat import CitationOut, ConversationOut, MessageOut, SourceRef
+from app.models import Conversation, Document, Message
+from app.schemas.chat import (
+    CitationOut,
+    ClaimOut,
+    ConversationOut,
+    DocumentChange,
+    MessageOut,
+    SourceRef,
+)
 from app.schemas.common import Page, PageParams
 from app.services import access, audit
 from app.services.access import Principal
@@ -25,7 +32,7 @@ from app.services.audit import AuditAction, RequestMeta
 # earlier answers that were part of this answer's prompt as conversation history.
 HISTORY_DOCUMENTS = "history_document_ids"
 # Metadata that can quote the answer or the history; withheld along with the answer.
-_DERIVED = ("search_query", "unverified_quotes")
+_DERIVED = ("search_query", "unverified_quotes", "claims")
 
 
 def document_ids(message: Message) -> set[uuid.UUID]:
@@ -110,11 +117,12 @@ def list_messages(
     # Citations only ever point at a message's own sources, so these cover them too.
     used = {row.id: document_ids(row) for row in rows}
     readable = access.readable_document_ids(db, principal, set().union(*used.values()))
+    items = [
+        _redact(message_out(row), readable, withhold=not used[row.id] <= readable) for row in rows
+    ]
+    _mark_changed_documents(db, [item for item in items if not item.redacted])
     return Page(
-        items=[
-            _redact(message_out(row), readable, withhold=not used[row.id] <= readable)
-            for row in rows
-        ],
+        items=items,
         total=db.scalar(select(func.count()).where(in_conversation)) or 0,
         page=page.page,
         page_size=page.page_size,
@@ -144,6 +152,7 @@ def message_out(message: Message) -> MessageOut:
     metadata = dict(message.retrieval_metadata or {})
     answer_status = metadata.pop("answer_status", None)
     citations = metadata.pop("citations", [])
+    claims = metadata.pop("claims", [])
     metadata.pop(HISTORY_DOCUMENTS, None)  # read by document_ids, not part of the contract
     return MessageOut(
         id=message.id,
@@ -154,6 +163,7 @@ def message_out(message: Message) -> MessageOut:
         answer_status=answer_status,
         sources=[SourceRef.model_validate(source) for source in message.sources or []],
         citations=[CitationOut.model_validate(citation) for citation in citations],
+        claims=[ClaimOut.model_validate(claim) for claim in claims],
         metadata=metadata,
         created_at=message.created_at,
     )
@@ -175,5 +185,52 @@ def _redact(message: MessageOut, readable: set[uuid.UUID], *, withhold: bool) ->
         ],
     }
     if withhold:
-        update |= {"content": "", "redacted": True, "metadata": without_derived(message.metadata)}
+        update |= {
+            "content": "",
+            "redacted": True,
+            "claims": [],
+            "metadata": without_derived(message.metadata),
+        }
     return message.model_copy(update=update)
+
+
+def _mark_changed_documents(db: Session, messages: list[MessageOut]) -> None:
+    """Fill `changed_documents`: cited documents indexed at a newer version since the
+    answer. Callers pass only messages whose documents the caller can read now. Sources
+    stored before versions were recorded have no version and never count as changed."""
+    used: dict[uuid.UUID, dict[uuid.UUID, int]] = {}
+    for message in messages:
+        for source in message.sources:
+            if source.cited and source.document_version is not None:
+                versions = used.setdefault(message.id, {})
+                # The oldest: a new version swapped in between the vector and keyword
+                # searches can give one answer passages of both.
+                versions[source.document_id] = min(
+                    versions.get(source.document_id, source.document_version),
+                    source.document_version,
+                )
+    ids = set().union(*used.values())
+    if not ids:
+        return
+    current = {
+        row.id: row
+        for row in db.execute(
+            select(
+                Document.id, Document.title, Document.indexed_version, Document.version_indexed_at
+            ).where(Document.id.in_(ids))
+        )
+    }
+    for message in messages:
+        for document_id, version in used.get(message.id, {}).items():
+            now = current.get(document_id)
+            if now is None or now.indexed_version is None or now.indexed_version <= version:
+                continue
+            message.changed_documents.append(
+                DocumentChange(
+                    document_id=document_id,
+                    document_title=now.title,
+                    used_version=version,
+                    current_version=now.indexed_version,
+                    current_since=now.version_indexed_at,
+                )
+            )

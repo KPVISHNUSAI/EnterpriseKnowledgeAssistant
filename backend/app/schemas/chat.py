@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.core.filetypes import FileType
 from app.models import MessageRole, MessageStatus
+from app.rag.claims import Verdict
 from app.rag.types import AnswerStatus
 
 
@@ -54,6 +55,9 @@ class SourceRef(BaseModel):
     page_number: int | None = None
     page_end: int | None = None
     section_title: str | None = None
+    document_version: int | None = Field(
+        default=None, description="Version of the document the passage came from."
+    )
     excerpt: str | None = Field(
         description="Passage text (null when redacted because access was revoked)."
     )
@@ -75,6 +79,30 @@ class CitationOut(BaseModel):
     )
 
 
+class ClaimOut(BaseModel):
+    """One statement of an answer, checked against the passages it cites by words and
+    numbers (app/rag/claims.py): evidence that it says what they say, not proof."""
+
+    text: str
+    source_ids: list[str]
+    verdict: Verdict
+    missing_numbers: list[str] = Field(
+        default_factory=list, description="Numbers in the statement that no cited passage has."
+    )
+
+
+class DocumentChange(BaseModel):
+    """A cited document whose indexed version is newer than the one the answer used."""
+
+    document_id: uuid.UUID
+    document_title: str
+    used_version: int
+    current_version: int
+    current_since: datetime | None = Field(
+        default=None, description="When the current version was first indexed."
+    )
+
+
 class MessageOut(BaseModel):
     id: uuid.UUID
     conversation_id: uuid.UUID
@@ -84,6 +112,10 @@ class MessageOut(BaseModel):
     answer_status: AnswerStatus | None = None
     sources: list[SourceRef] = Field(default_factory=list)
     citations: list[CitationOut] = Field(default_factory=list)
+    claims: list[ClaimOut] = Field(default_factory=list)
+    changed_documents: list[DocumentChange] = Field(
+        default_factory=list, description="Only in conversation history."
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Retrieval summary: search_query, mode, reranked, timings_ms, usage.",

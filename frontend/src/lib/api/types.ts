@@ -48,6 +48,8 @@ export type Conversation = S["ConversationOut"];
 export type Message = S["MessageOut"];
 export type SourceRef = S["SourceRef"];
 export type Citation = S["CitationOut"];
+export type Claim = S["ClaimOut"];
+export type DocumentChange = S["DocumentChange"];
 export type AnswerStatus = S["AnswerStatus"];
 export type MessageStatus = S["MessageStatus"];
 // The SSE event payloads (backend/app/schemas/chat.py: Stream*Event) are not part of the

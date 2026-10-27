@@ -26,6 +26,7 @@ from app.providers.embeddings import EmbeddingProvider
 from app.providers.llm import LLMError, LLMProvider, LLMRequest, LLMTextDelta
 from app.providers.rerankers import Reranker
 from app.rag.citations import final_status, validate
+from app.rag.claims import Verdict, check_claims
 from app.rag.context import build_context
 from app.rag.extractive import INSUFFICIENT_MESSAGE, stream_extractive
 from app.rag.prompts import SYSTEM_PROMPT, build_messages
@@ -59,6 +60,8 @@ _STATUS_LINE = re.compile(
     r"^[\s*#_]*STATUS\s*:\s*(ANSWERED|PARTIAL|INSUFFICIENT)\b.*$", re.IGNORECASE
 )
 _STATUS_PROBE_CHARS = 40  # longer than any status line: stop holding text back
+# Answers that make claims, so their statements are checked (the evaluation's "judged").
+_CLAIMING = (AnswerStatus.ANSWERED, AnswerStatus.PARTIAL, AnswerStatus.UNVERIFIED)
 
 
 def answer_question(
@@ -155,6 +158,9 @@ def stream_answer(
                 chunks = _llm_chunks(llm, request, outcome)
             yield from _relay(chunks, outcome, cancel)
         _finish(result, outcome, passages)
+        if result.status in _CLAIMING:
+            texts = {p.source_id: p.text for p in passages}
+            result.claims = check_claims(result.answer, query, texts)
         GENERATION_LATENCY.labels(result.provider, result.model or result.provider).observe(
             timings["generation"] / 1000
         )
@@ -168,6 +174,8 @@ def stream_answer(
             "citations": len(result.citations),
             "invalid_citations": len(result.invalid_citations),
             "unverified_quotes": len(result.unverified_quotes),
+            "claims": len(result.claims),
+            "unsupported_claims": sum(c.verdict is not Verdict.SUPPORTED for c in result.claims),
             "provider": result.provider,
             "model": result.model,
             "flags": sorted(result.metadata),

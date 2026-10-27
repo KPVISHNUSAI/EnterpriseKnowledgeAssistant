@@ -407,6 +407,8 @@ class Factory:
             uploaded_by=uploaded_by.id if uploaded_by else None,
             processing_status=status,
             indexed_at=utcnow() if status == DocumentStatus.INDEXED else None,
+            indexed_version=1 if status == DocumentStatus.INDEXED else None,
+            version_indexed_at=utcnow() if status == DocumentStatus.INDEXED else None,
         )
         rows: list[Any] = [doc]
         if not restricted:

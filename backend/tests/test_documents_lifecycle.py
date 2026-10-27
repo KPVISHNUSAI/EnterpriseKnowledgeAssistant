@@ -248,6 +248,16 @@ def _citation(doc_id, source_id: str) -> dict:
     }
 
 
+CLAIMS = [
+    {
+        "text": "Berlin closes in March.",
+        "source_ids": ["S1"],
+        "verdict": "supported",
+        "missing_numbers": [],
+    }
+]
+
+
 def test_delete_removes_everything_derived_from_the_document(
     login_as, factory, tenant, db, monkeypatch
 ):
@@ -285,6 +295,7 @@ def test_delete_removes_everything_derived_from_the_document(
         sources=[_source(doc_id, "S1", ws), _source(keep_id, "S2", ws)],
         retrieval_metadata={
             "citations": [_citation(doc_id, "S1"), _citation(keep_id, "S2")],
+            "claims": CLAIMS,
             "mode": "hybrid",
         },
     )
@@ -310,6 +321,7 @@ def test_delete_removes_everything_derived_from_the_document(
             "history_document_ids": [str(doc_id)],
             "search_query": "when does the berlin office close",
             "unverified_quotes": ["Berlin closes in March"],
+            "claims": CLAIMS,
         },
     )
     db.add_all([message, untouched, inherited])
@@ -347,6 +359,7 @@ def test_delete_removes_everything_derived_from_the_document(
     )
     assert kept_citation == _citation(keep_id, "S2")
     assert scrubbed.retrieval_metadata["mode"] == "hybrid"
+    assert "claims" not in scrubbed.retrieval_metadata  # statements quote the answer
     # The scrubbed payloads still satisfy the chat contract.
     SourceRef.model_validate(deleted_source)
     CitationOut.model_validate(deleted_citation)

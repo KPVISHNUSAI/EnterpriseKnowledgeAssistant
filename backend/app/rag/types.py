@@ -9,10 +9,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.core.config import Settings
 from app.services.access import Principal
+
+if TYPE_CHECKING:
+    from app.rag.claims import ClaimCheck
 
 RetrievalMode = Literal["vector", "keyword", "hybrid"]
 
@@ -78,6 +81,8 @@ class Candidate:
     metadata: dict[str, Any] = field(default_factory=dict)
     # A document manager let this document's flagged text (metadata["flags"]) into answers.
     include_flagged: bool = False
+    # The document version this chunk belongs to (None for documents indexed before 0004).
+    document_version: int | None = None
     # Per-method evidence, kept for explainability ("why did this match?").
     vector_rank: int | None = None
     vector_similarity: float | None = None
@@ -152,6 +157,9 @@ class AnswerResult:
     citations: list[Citation]
     invalid_citations: list[str] = field(default_factory=list)
     unverified_quotes: list[str] = field(default_factory=list)
+    # Each statement checked against the passages it cites (app/rag/claims.py); empty for
+    # abstentions, refusals and errors.
+    claims: list[ClaimCheck] = field(default_factory=list)
     provider: str = "extractive"
     model: str | None = None
     usage: TokenUsage = field(default_factory=TokenUsage)

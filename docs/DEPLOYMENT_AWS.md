@@ -216,6 +216,18 @@ they differ. Because the previous release keeps serving while a migration runs, 
 migrations so that the old code still works with the new schema (add first, remove in a later
 release).
 
+**Upgrading to migration 0004 (answer receipts).** A worker of the previous release that
+indexes a document during the rollout swaps in the new text without recording its version,
+so that document's answers name the wrong version until it is indexed again. Stop the
+workers before the migration task and start them with the new release; jobs wait in the
+queue meanwhile:
+
+```bash
+aws ecs update-service --cluster eka --service eka-worker --desired-count 0 > /dev/null
+aws ecs wait services-stable --cluster eka --services eka-worker
+# ... run the migration task above, deploy the new release, then restore the worker count
+```
+
 ## 5. Redis (ElastiCache)
 
 | Setting | Value |

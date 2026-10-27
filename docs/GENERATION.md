@@ -28,7 +28,9 @@ tenant-bound; the pipeline never commits.
 
 `AnswerResult` fields: `question` (normalized), `answer` (display text, status line
 stripped, invalid markers removed), `status`, `retrieval` (`search_query` is what was
-searched), `passages`, `citations`, `invalid_citations`, `unverified_quotes`, `provider`,
+searched), `passages`, `citations`, `invalid_citations`, `unverified_quotes`, `claims`
+(each statement checked against its cited passages by `app/rag/claims.py`; empty unless the
+status is `answered`, `partial` or `unverified`), `provider`,
 `model`, `usage`, `rewrite_usage`, `rewrite_model`, `timings_ms` (`rewrite` when attempted,
 `retrieval`, `generation` when a generator ran, `total`), `metadata` (`truncated`,
 `cancelled`, `error: {kind, retryable}`).
@@ -183,13 +185,17 @@ small word groups, so chat, validation and the UI behave exactly as with a model
   (`error` for a provider failure, `incomplete` when cancelled); `sources` = one
   `SourceRef` per supplied passage (`source_id`, `chunk_id`, `document_id`,
   `document_title`, `workspace_id`, `file_type`, `page_number`, `page_end`,
-  `section_title`, `excerpt` = passage text, `relevance`, `cited`, `redacted`);
-  `retrieval_metadata` = `{answer_status, citations: [CitationOut...], invalid_citations,
-  unverified_quotes, search_query, mode, reranked, timings_ms, usage, provider, model}` plus
+  `section_title`, `document_version` (the indexed version the passage came from),
+  `excerpt` = passage text, `relevance`, `cited`, `redacted`);
+  `retrieval_metadata` = `{answer_status, citations: [CitationOut...], claims:
+  [ClaimOut...], invalid_citations, unverified_quotes, search_query, mode, reranked,
+  timings_ms, usage, provider, model}` plus
   the generation flags. The documents service scrubs `sources` and `citations` entries by
   `document_id` when a document is deleted; those key names are part of the contract.
 * **Reading history** (`GET /conversations/{id}/messages`): `MessageOut` is built from the
-  stored JSON (`answer_status` and `citations` come out of `retrieval_metadata`). Sources
+  stored JSON (`answer_status`, `citations` and `claims` come out of `retrieval_metadata`),
+  plus `changed_documents`: cited documents indexed at a newer version since the answer
+  ([ARCHITECTURE.md](ARCHITECTURE.md#answer-receipts)). Sources
   and citations whose document the caller can no longer read (access revoked, document
   deleted) are redacted at read time through `access.readable_document_ids`: `excerpt` and
   `section_title` become null and `redacted` true; the stored row is untouched, so access
@@ -254,9 +260,11 @@ set. Prometheus: `eka_llm_tokens_total{provider,model,direction}`,
 
 ## Limitations
 
-* Citation markers are validated for *existence*, not for whether the cited passage really
-  supports the claim; the excerpt (term overlap) is a reading aid, not a proof. Entailment
-  checking would need a second model call per claim.
+* Citation markers are validated for *existence*. The receipt's statement check
+  (`app/rag/claims.py`) adds that a statement's numbers and most of its words are in the
+  cited passage, but it is lexical: a negation or a swapped pairing passes. The excerpt
+  (term overlap) is a reading aid, not a proof. Entailment checking would need a second
+  model call per claim.
 * Quote verification is lexical: paraphrases in quotes are flagged, and a quote spanning
   two passages may pass.
 * The extractive generator cannot synthesize, compare or compute; it returns sentences.

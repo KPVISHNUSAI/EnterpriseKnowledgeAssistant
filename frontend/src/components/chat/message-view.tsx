@@ -7,6 +7,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Spinner } from "@/components/ui/feedback";
 import type { DisplayMessage } from "@/lib/chat-state";
 import { AnswerBanner, answerNotice } from "./answer-banner";
+import { AnswerReceipt, ReplacedSources } from "./answer-receipt";
 import { MarkdownAnswer } from "./markdown-answer";
 
 interface Props {
@@ -31,6 +32,9 @@ export const MessageView = memo(function MessageView({ message, canRetry, onCite
 
   const waiting = message.streaming && !message.content;
   const notice = answerNotice(message);
+  const settled = !message.streaming && !message.redacted;
+  const claims = settled ? (message.claims ?? []) : [];
+  const changes = settled ? (message.changedDocuments ?? []) : [];
   return (
     <article
       aria-label="Assistant answer"
@@ -42,6 +46,7 @@ export const MessageView = memo(function MessageView({ message, canRetry, onCite
         <Sparkles className="size-3.5" />
       </span>
       <div className="min-w-0 flex-1">
+        {changes.length ? <ReplacedSources changes={changes} className="mb-3" /> : null}
         {notice?.placement === "top" ? <AnswerBanner notice={notice} className="mb-3" /> : null}
         {waiting ? (
           <p className="flex items-center gap-2 text-sm text-slate-500" data-testid="answer-stage">
@@ -58,6 +63,7 @@ export const MessageView = memo(function MessageView({ message, canRetry, onCite
             />
           </div>
         ) : null}
+        {claims.length ? <AnswerReceipt claims={claims} sources={message.sources} /> : null}
         {notice?.placement === "bottom" ? <AnswerBanner notice={notice} className="mt-3" /> : null}
 
         {!message.streaming ? (
