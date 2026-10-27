@@ -16,7 +16,9 @@ from app.rag.types import AnswerStatus, Citation, ContextPassage
 MIN_QUOTE_CHARS = 20
 EXCERPT_MAX_CHARS = 500
 
-_MARKER = re.compile(r"\[\s*([sS]\d+(?:\s*[,;]\s*[sS]\d+)*)\s*\]")
+# Square brackets, or what some models write instead: parentheses, or full-width brackets
+# (gpt-oss: U+3010/U+3011, U+FF3B/U+FF3D).
+_MARKER = re.compile(r"[\[(\u3010\uff3b]\s*([sS]\d+(?:\s*[,;]\s*[sS]\d+)*)\s*[\])\u3011\uff3d]")
 _ID = re.compile(r"[sS]\d+")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
 _WORD = re.compile(r"[^\W_]+")

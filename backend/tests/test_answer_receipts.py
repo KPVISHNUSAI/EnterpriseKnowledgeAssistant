@@ -102,6 +102,25 @@ def test_an_echo_of_a_leading_question_is_not_a_match():
     assert loose.verdict is Verdict.SUPPORTED
 
 
+def test_a_number_given_as_one_of_the_passages_pages_is_known():
+    passages = {"S1": "Report weaknesses to the helpdesk."}
+    answer = (
+        "Pages 5-6 say to report weaknesses to the helpdesk [S1]. "
+        "Staff get 5 warnings [S1]. "
+        "Page 7 says to report weaknesses [S1]. "
+        # As gpt-oss writes it: bold, with a non-breaking hyphen.
+        "Reporting weaknesses to the helpdesk is on page **5\N{NON-BREAKING HYPHEN}6** [S1]."
+    )
+    on_page, figure, other_page, styled = check_claims(
+        answer, "Which page covers reporting?", passages, pages={"S1": range(5, 7)}
+    )
+    assert on_page.verdict is Verdict.SUPPORTED and styled.verdict is Verdict.SUPPORTED
+    # The page number is not evidence for anything but a page...
+    assert (figure.verdict, figure.missing_numbers) == (Verdict.UNSUPPORTED, ("5",))
+    # ...and only for the pages the passage is on.
+    assert (other_page.verdict, other_page.missing_numbers) == (Verdict.UNSUPPORTED, ("7",))
+
+
 def test_an_answer_comes_with_its_receipt(app, login_as, tenant, handbook, db):
     client = login_as(tenant.viewer, tenant.org)
     body = ask(app, client)
@@ -127,6 +146,23 @@ def test_an_answer_comes_with_its_receipt(app, login_as, tenant, handbook, db):
     set_tenant(db, tenant.org.id)
     audited = db.scalars(select(AuditEvent).where(AuditEvent.action == "chat.answered")).one()
     assert (audited.event_metadata["claims"], audited.event_metadata["claims_supported"]) == (2, 1)
+
+
+def test_the_title_and_page_the_model_was_shown_count_as_evidence(app, login_as, tenant, handbook):
+    """S1 is page 3 of the Employee Handbook: the model is told so, though the passage
+    text does not say it. Without the title only "paid" of its new words would be in
+    the source, too few; without the page, the "3" would be missing."""
+    client = login_as(tenant.viewer, tenant.org)
+    text = (
+        "STATUS: ANSWERED\n\n"
+        "Page 3 of the Employee Handbook covers paid vacation [S1]. "
+        "Page 9 covers it too [S1]."
+    )
+    claims = ask(app, client, text)["assistant_message"]["claims"]
+    assert [(c["verdict"], c["missing_numbers"]) for c in claims] == [
+        ("supported", []),
+        ("unsupported", ["9"]),
+    ]
 
 
 def test_an_abstention_has_no_statements(app, login_as, tenant, handbook):

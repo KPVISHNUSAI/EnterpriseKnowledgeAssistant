@@ -23,13 +23,19 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.metrics import GENERATION_LATENCY
 from app.providers.embeddings import EmbeddingProvider
-from app.providers.llm import LLMError, LLMProvider, LLMRequest, LLMTextDelta
+from app.providers.llm import (
+    LLMError,
+    LLMProvider,
+    LLMRateLimitError,
+    LLMRequest,
+    LLMTextDelta,
+)
 from app.providers.rerankers import Reranker
 from app.rag.citations import final_status, validate
 from app.rag.claims import Verdict, check_claims
 from app.rag.context import build_context
 from app.rag.extractive import INSUFFICIENT_MESSAGE, stream_extractive
-from app.rag.prompts import SYSTEM_PROMPT, build_messages
+from app.rag.prompts import SYSTEM_PROMPT, build_messages, source_label
 from app.rag.query import normalize_query
 from app.rag.retrieval import retrieve
 from app.rag.rewrite import Rewrite, rewrite_query
@@ -38,6 +44,7 @@ from app.rag.types import (
     AnswerDelta,
     AnswerResult,
     AnswerStatus,
+    Candidate,
     ChatTurn,
     ContextPassage,
     PipelineEvent,
@@ -55,6 +62,16 @@ ERROR_MESSAGE = (
     "The answer could not be generated because the language model did not respond. "
     "Please try again."
 )
+RATE_LIMITED_MESSAGE = (
+    "The language model's usage limit was reached, so no answer was generated. "
+    "Wait a minute, then ask again."
+)
+
+
+def failure_message(kind: str) -> str:
+    """What the user is told when generation failed with an LLMError of this kind."""
+    return RATE_LIMITED_MESSAGE if kind == LLMRateLimitError.kind else ERROR_MESSAGE
+
 
 _STATUS_LINE = re.compile(
     r"^[\s*#_]*STATUS\s*:\s*(ANSWERED|PARTIAL|INSUFFICIENT)\b.*$", re.IGNORECASE
@@ -159,8 +176,11 @@ def stream_answer(
             yield from _relay(chunks, outcome, cancel)
         _finish(result, outcome, passages)
         if result.status in _CLAIMING:
-            texts = {p.source_id: p.text for p in passages}
-            result.claims = check_claims(result.answer, query, texts)
+            # The model also sees each source's title, section and page, so "page 3 of the
+            # manual says ..." is checked against them too.
+            texts = {p.source_id: f"{source_label(p.candidate)}\n{p.text}" for p in passages}
+            pages = {p.source_id: _pages(p.candidate) for p in passages}
+            result.claims = check_claims(result.answer, query, texts, pages=pages)
         GENERATION_LATENCY.labels(result.provider, result.model or result.provider).observe(
             timings["generation"] / 1000
         )
@@ -285,9 +305,9 @@ def _finish(result: AnswerResult, outcome: _Outcome, passages: list[ContextPassa
     if outcome.cancelled:
         result.metadata["cancelled"] = True
     if outcome.error is not None:
-        result.status = AnswerStatus.ERROR
-        result.answer = validated.text or ERROR_MESSAGE
         error = outcome.error
+        result.status = AnswerStatus.ERROR
+        result.answer = validated.text or failure_message(error.kind)
         result.metadata["error"] = {"kind": error.kind, "retryable": error.retryable}
 
 
@@ -336,6 +356,12 @@ class _StatusLine:
             text = text.lstrip()
             self._skip_blank = not text
         return text
+
+
+def _pages(candidate: Candidate) -> range:
+    if candidate.page_number is None:
+        return range(0)
+    return range(candidate.page_number, (candidate.page_end or candidate.page_number) + 1)
 
 
 def _late_status(text: str) -> tuple[str | None, str]:

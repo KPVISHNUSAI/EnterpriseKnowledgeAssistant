@@ -297,6 +297,13 @@ def test_heuristic_rewrite_without_an_llm(ask, tenant, handbook):
     assert standalone.retrieval.search_query == QUESTION
     short = ask(tenant.viewer, tenant.org, "And contractors?", llm=None, history=HISTORY)
     assert short.retrieval.search_query == "And contractors? vacation policy"
+    pointing = "Does it apply to contractors?"
+    follow_up = ask(tenant.viewer, tenant.org, pointing, llm=None, history=HISTORY)
+    assert follow_up.retrieval.search_query == f"{pointing} vacation policy"
+    # A pronoun in a question that names its own subject does not make it a follow-up.
+    own = "Can employees share their email passwords?"
+    standalone = ask(tenant.viewer, tenant.org, own, llm=None, history=HISTORY)
+    assert standalone.retrieval.search_query == own
 
 
 # --- Security ---------------------------------------------------------------------------------

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -30,6 +30,7 @@ _FOLD = str.maketrans(
         "\N{RIGHT DOUBLE QUOTATION MARK}": '"',
         "\N{LEFT SINGLE QUOTATION MARK}": "'",
         "\N{RIGHT SINGLE QUOTATION MARK}": "'",
+        "\N{HYPHEN}": "-",  # NFKC turns the non-breaking hyphen into this one
         "\N{EN DASH}": "-",
         "\N{EM DASH}": "-",
         "\N{MINUS SIGN}": "-",
@@ -40,6 +41,8 @@ _MARKER = re.compile(r"\[\s*([sS]\d+(?:\s*[,;]\s*[sS]\d+)*)\s*\]")
 _SOURCE_ID = re.compile(r"[sS]\d+")
 _NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)*")
 _LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+# "page 3", "pages 5-6", "p. 4", "page **5-6**": numbers a claim gives as pages.
+_PAGE_REFERENCE = re.compile(r"\b(?:pages?|pp?\.?)[\s*_]*(\d+)(?:[\s*_]*(?:-|to|and)[\s*_]*(\d+))?")
 _SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+(?=[.,;:!?])")
 
 
@@ -96,7 +99,12 @@ def supported(claim: str, cited: Sequence[str], question: str) -> bool:
 
 
 def check_claims(
-    answer: str, question: str, passages: Mapping[str, str], *, strict: bool = True
+    answer: str,
+    question: str,
+    passages: Mapping[str, str],
+    *,
+    strict: bool = True,
+    pages: Mapping[str, Iterable[int]] | None = None,
 ) -> list[ClaimCheck]:
     """Every claim of `answer` with its verdict; `passages` maps source ids to the passage
     text given to the generator.
@@ -105,25 +113,34 @@ def check_claims(
     passages, and compares a claim that adds no word to the question on all its words: a
     leading question ("Is the retention period 7 years?") must not make its own echo a
     match. The evaluation's faithfulness metric keeps its published rule (strict=False),
-    which only checks what the claim adds."""
+    which only checks what the claim adds.
+
+    `pages` maps source ids to the pages the generator was told each passage is on. A
+    claim may give those as pages ("page 3 of the handbook"); any other use of the number
+    still has to be in the text, since page numbers collide with figures like "3 days".
+    ponytail: per claim, so "page 3 says 3 directors" passes; split such claims if it matters."""
     checked: list[ClaimCheck] = []
     for text, ids in claims(answer):
         cited = [passages[i] for i in ids if i in passages]
         if not ids:
             checked.append(ClaimCheck(text, ids, Verdict.UNCITED))
             continue
-        ok, missing = _check(text, cited, question, strict=strict) if cited else (False, ())
+        on_pages = {str(page) for i in ids for page in (pages or {}).get(i, ())}
+        ok, missing = (
+            _check(text, cited, question, strict=strict, pages=on_pages) if cited else (False, ())
+        )
         verdict = Verdict.SUPPORTED if ok else Verdict.UNSUPPORTED
         checked.append(ClaimCheck(text, ids, verdict, missing))
     return checked
 
 
 def _check(
-    claim: str, cited: Sequence[str], question: str, *, strict: bool
+    claim: str, cited: Sequence[str], question: str, *, strict: bool, pages: Set[str] = frozenset()
 ) -> tuple[bool, tuple[str, ...]]:
     claim, question = normalize(claim), normalize(question)
     evidence = " ".join(normalize(text) for text in cited)
     known = _numbers(evidence, prefixes=True) | (set() if strict else _numbers(question))
+    known |= {n for match in _PAGE_REFERENCE.finditer(claim) for n in match.groups() if n in pages}
     missing = tuple(n for n in dict.fromkeys(_NUMBER.findall(claim)) if n not in known)
     if missing:
         return False, missing

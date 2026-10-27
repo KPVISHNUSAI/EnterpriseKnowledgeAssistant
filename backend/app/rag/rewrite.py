@@ -32,6 +32,9 @@ _ANAPHORA_TEXT = (
 )
 _ANAPHORA = frozenset(_ANAPHORA_TEXT.split())
 _SHORT_FOLLOW_UP_TERMS = 1
+# A longer question names its own subject even with a pronoun in it: the "their" in "Can
+# employees share their email passwords?" is the employees.
+_ANAPHORA_MAX_TERMS = 3
 
 
 @dataclass
@@ -71,15 +74,17 @@ def rewrite_query(
 
 
 def heuristic_rewrite(question: str, history: Sequence[ChatTurn]) -> str:
-    """A short question or one that refers back ("why is that?") gets the content words
-    of the previous question appended; anything else is taken as standalone.
+    """A short question, or one of a few terms that refers back ("why is that?", "does it
+    apply to contractors?"), gets the content words of the previous question appended;
+    anything else is taken as standalone.
     ponytail: a lexical guess; the LLM rewrite is the real thing when a model is configured."""
     previous = next((turn.content for turn in reversed(history) if turn.role == "user"), None)
     if previous is None:
         return question
     own = set(terms(question))
     words = set(_WORD.findall(question.casefold()))
-    if len(own) > _SHORT_FOLLOW_UP_TERMS and not words & _ANAPHORA:
+    refers_back = bool(words & _ANAPHORA) and len(own) <= _ANAPHORA_MAX_TERMS
+    if len(own) > _SHORT_FOLLOW_UP_TERMS and not refers_back:
         return question
     salient = [word for word in content_words(previous) if stem(word.casefold()) not in own]
     return f"{question} {' '.join(dict.fromkeys(salient))}" if salient else question

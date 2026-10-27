@@ -30,7 +30,7 @@ from app.models import Conversation, Message, MessageRole, MessageStatus
 from app.providers.embeddings import EmbeddingProvider
 from app.providers.llm import LLMProvider
 from app.providers.rerankers import Reranker
-from app.rag.answer import ERROR_MESSAGE, stream_answer
+from app.rag.answer import failure_message, stream_answer
 from app.rag.claims import Verdict
 from app.rag.query import normalize_query
 from app.rag.types import (
@@ -272,7 +272,9 @@ def _terminal_event(state: _StreamState, message: Message | None) -> bytes:
     result = state.result
     if result is not None and result.status == AnswerStatus.ERROR:
         kind = str(result.metadata.get("error", {}).get("kind", "error"))
-        return encode_event("error", StreamErrorEvent(code=f"llm_{kind}", message=ERROR_MESSAGE))
+        return encode_event(
+            "error", StreamErrorEvent(code=f"llm_{kind}", message=failure_message(kind))
+        )
     if message is None:
         return encode_event(
             "error",

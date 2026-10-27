@@ -221,6 +221,15 @@ Each configuration returns its fused top 30 for every case. Retrieval is scored 
 
 ## Results
 
+### New answer instructions (2026-10-28)
+
+The system prompt was rewritten (see [GENERATION.md](GENERATION.md)): answers must give
+every rule that applies, cite each list item, and say which document each point comes
+from. The extractive fallback also skips headings. The extractive configurations were
+re-run after these changes, and none of the 89 answers changed in any of the three
+configurations. The LLM run was not repeated, so every llama3.1:8b number below was
+measured with the previous prompt.
+
 ### Quarantine of text addressed to AI assistants (2026-10-20)
 
 Text addressed to AI assistants is now flagged at ingestion and left out of the model's

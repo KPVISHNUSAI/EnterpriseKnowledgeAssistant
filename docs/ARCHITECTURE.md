@@ -213,8 +213,11 @@ the exact document versions it used. Design:
   and the evaluation run the same code, with one difference. The evaluation's published
   rule (`strict=False`) does not look for what a statement takes from the question, so
   for "Is the retention period 7 years?" it would pass "The retention period is 7 years"
-  against a passage that says 5. Receipts check those numbers and words too. Only
-  answers that make claims are checked
+  against a passage that says 5. Receipts check those numbers and words too. A
+  receipt's evidence is also what the model was told about each source besides its text:
+  the title and section count as words, and a page number counts only where the statement
+  gives it as a page ("page 3 of the manual"), since page numbers collide with figures
+  like "3 days". Only answers that make claims are checked
   (`answered`, `partial`, `unverified`). The verdicts never change the answer's status.
 * **Versions.** `documents.version` counts uploads, but the previous version stays
   searchable until the new one is indexed. So the ingestion runner records

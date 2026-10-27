@@ -14,9 +14,9 @@ from app.core.config import get_settings
 from app.db.session import set_tenant
 from app.models import AuditEvent, Message, MessageStatus, UsageRecord
 from app.providers.embeddings import HashingEmbedder
-from app.providers.llm import LLMUnavailableError
+from app.providers.llm import LLMRateLimitError, LLMUnavailableError
 from app.providers.registry import get_llm
-from app.rag.answer import ERROR_MESSAGE
+from app.rag.answer import ERROR_MESSAGE, RATE_LIMITED_MESSAGE
 from app.schemas.chat import ChatRequest
 from app.services import chat as chat_service
 from app.services.audit import RequestMeta
@@ -109,18 +109,24 @@ def test_events_arrive_in_order_and_the_final_message_is_persisted(
     assert [m["status"] for m in messages["items"]] == ["complete", "complete"]
 
 
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (LLMUnavailableError("down", retryable=True), "llm_unavailable", ERROR_MESSAGE),
+        # A usage limit (e.g. a free tier's tokens per minute) says to wait, not that it broke.
+        (LLMRateLimitError("429", retry_after=40), "llm_rate_limited", RATE_LIMITED_MESSAGE),
+    ],
+)
 def test_provider_failure_emits_an_error_event_and_persists_an_error_turn(
-    app, login_as, tenant, handbook, db
+    app, login_as, tenant, handbook, db, error, code, message
 ):
-    app.dependency_overrides[get_llm] = lambda: FakeLLM(
-        error=LLMUnavailableError("down", retryable=True)
-    )
+    app.dependency_overrides[get_llm] = lambda: FakeLLM(error=error)
     status, events = stream(login_as(tenant.viewer, tenant.org))
     assert status == 200 and names(events) == ["meta", "sources", "error"]
-    assert events[-1][1] == {"code": "llm_unavailable", "message": ERROR_MESSAGE}
+    assert events[-1][1] == {"code": code, "message": message}
     set_tenant(db, tenant.org.id)
     stored = db.get(Message, uuid.UUID(events[0][1]["assistant_message_id"]))
-    assert stored.status == MessageStatus.ERROR and stored.content == ERROR_MESSAGE
+    assert stored.status == MessageStatus.ERROR and stored.content == message
     assert stored.retrieval_metadata["answer_status"] == "error"
     assert len(stored.sources) == 2
 

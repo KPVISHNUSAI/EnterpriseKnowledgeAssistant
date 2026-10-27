@@ -80,6 +80,19 @@ def test_near_duplicate_sentences_are_not_repeated_and_count_is_capped():
 def test_headings_and_fragments_are_never_answers():
     picks = select_sentences("leave", PASSAGES)
     assert all(pick.sentence != "Leave" for pick in picks)
+    # A title shares the question's words best of all, but it answers nothing.
+    desk = passage(
+        "S1",
+        "Clear Desk and Clear Screen Policy\n"
+        "Leave Policy..........................12\n"
+        "• To lock their desk and filing cabinets at the end of the day\n"
+        "Clear desk audits | 4 per year",
+    )
+    picked = [pick.sentence for pick in select_sentences("What is the clear desk policy?", [desk])]
+    assert picked == [
+        "Clear desk audits | 4 per year",
+        "• To lock their desk and filing cabinets at the end of the day",
+    ]
 
 
 def test_streaming_reassembles_to_the_full_answer():

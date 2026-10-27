@@ -24,6 +24,8 @@ ANSWERED_COVERAGE = 0.6
 MIN_COVERAGE = 0.3
 _DUPLICATE_SHARE = 0.8  # a sentence whose terms mostly repeat a kept one adds nothing
 _MIN_SENTENCE_CHARS = 20  # headings and fragments are not answers
+_HEADING_MAX_WORDS = 8
+_LEADER = "...."  # table-of-contents dot leaders: "Leave Policy........12"
 _CHUNK_WORDS = 4
 
 
@@ -67,7 +69,7 @@ def select_sentences(question: str, passages: Sequence[ContextPassage]) -> list[
     scored: list[Pick] = []
     for passage in passages:
         for sentence in split_sentences(passage.text):
-            if len(sentence) < _MIN_SENTENCE_CHARS or REMOVED in sentence:
+            if len(sentence) < _MIN_SENTENCE_CHARS or REMOVED in sentence or _heading(sentence):
                 continue
             covered = frozenset(weights) & frozenset(terms(sentence))
             coverage = sum(weights[term] for term in covered) / total
@@ -86,6 +88,22 @@ def select_sentences(question: str, passages: Sequence[ContextPassage]) -> list[
         picks.append(pick)
         kept.append(own)
     return picks
+
+
+def _heading(sentence: str) -> bool:
+    """A title line ("Clear Desk and Clear Screen Policy") or a table-of-contents row: it
+    names a topic, it answers nothing, and it matches the question's words best of all.
+    List items, table rows and lines with figures or end punctuation are kept."""
+    if _LEADER in sentence:
+        return True
+    words = sentence.split()
+    return (
+        len(words) <= _HEADING_MAX_WORDS
+        and sentence[-1] not in ".!?:;"
+        and sentence[0].isalpha()
+        and not any(char.isdigit() or char == "|" for char in sentence)
+        and sum(word[0].isupper() for word in words) * 2 >= len(words)
+    )
 
 
 def _idf(question: str, passages: Sequence[ContextPassage]) -> dict[str, float]:

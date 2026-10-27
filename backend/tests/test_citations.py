@@ -34,6 +34,10 @@ PASSAGES = [passage("S1", LEAVE, page=3, section="Leave"), passage("S2", CAFETER
         ("Days [ S2 ,S1 ].", "Days [S2, S1].", ["S2", "S1"]),
         ("Days [S1][S2].", "Days [S1][S2].", ["S1", "S2"]),
         ("Days [S1, S1].", "Days [S1].", ["S1"]),
+        # gpt-oss writes full-width brackets.
+        ("Days \u3010S1\u3011. Hours \u3010S2\u3011.", "Days [S1]. Hours [S2].", ["S1", "S2"]),
+        ("Days \uff3bS1, S2\uff3d.", "Days [S1, S2].", ["S1", "S2"]),
+        ("Days (S1). Hours *(S1, S2)*.", "Days [S1]. Hours *[S1, S2]*.", ["S1", "S2"]),
         (
             "Days [S1]. Hours [S2]. More days [S1].",
             "Days [S1]. Hours [S2]. More days [S1].",
