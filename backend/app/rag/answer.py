@@ -5,7 +5,8 @@ suite both drive it):
 
 Generation streams (LLM or the offline extractive generator) behind one STATUS-line
 parser, so the UI sees tokens early and never sees the status marker. With no passages
-there is no model call at all: the answer is a fixed abstention.
+there is no model call at all: the answer is a fixed abstention. A message that is only
+small talk ("hi", "thanks", "what can you do?") skips retrieval too and gets a fixed reply.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from app.rag.claims import Verdict, check_claims
 from app.rag.context import build_context
 from app.rag.extractive import INSUFFICIENT_MESSAGE, stream_extractive
 from app.rag.prompts import SYSTEM_PROMPT, build_messages, source_label
-from app.rag.query import normalize_query
+from app.rag.query import normalize_query, small_talk_reply
 from app.rag.retrieval import retrieve
 from app.rag.rewrite import Rewrite, rewrite_query
 from app.rag.types import (
@@ -50,6 +51,7 @@ from app.rag.types import (
     PipelineEvent,
     RetrievalCompleted,
     RetrievalOptions,
+    RetrievalResult,
     SearchScope,
     TokenUsage,
 )
@@ -124,26 +126,31 @@ def stream_answer(
     started = time.perf_counter()
     timings: dict[str, float] = {}
     query = normalize_query(question, max_chars=settings.max_query_chars)
+    small_talk = small_talk_reply(query)
 
     rewrite = Rewrite(query)
-    if history and settings.query_rewrite_enabled:
-        with _timed(timings, "rewrite"):
-            rewrite = rewrite_query(query, history, llm=llm)
-        if rewrite.usage is not None:
-            rewrite.usage.cost_usd = estimate_cost(
-                rewrite.usage.input_tokens, rewrite.usage.output_tokens, rewrite=True
+    if small_talk is not None:
+        retrieval = RetrievalResult(query, query, [], 0, options, reranked=False)
+        passages: list[ContextPassage] = []
+    else:
+        if history and settings.query_rewrite_enabled:
+            with _timed(timings, "rewrite"):
+                rewrite = rewrite_query(query, history, llm=llm)
+            if rewrite.usage is not None:
+                rewrite.usage.cost_usd = estimate_cost(
+                    rewrite.usage.input_tokens, rewrite.usage.output_tokens, rewrite=True
+                )
+        with _timed(timings, "retrieval"):
+            retrieval = retrieve(
+                db,
+                scope,
+                query,
+                options=options,
+                embedder=embedder,
+                reranker=reranker,
+                search_query=rewrite.query,
             )
-    with _timed(timings, "retrieval"):
-        retrieval = retrieve(
-            db,
-            scope,
-            query,
-            options=options,
-            embedder=embedder,
-            reranker=reranker,
-            search_query=rewrite.query,
-        )
-        passages = build_context(retrieval.candidates, max_tokens=settings.context_max_tokens)
+            passages = build_context(retrieval.candidates, max_tokens=settings.context_max_tokens)
     yield RetrievalCompleted(retrieval=retrieval, passages=passages)
 
     result = AnswerResult(
@@ -159,7 +166,12 @@ def stream_answer(
         rewrite_model=rewrite.model,
         timings_ms=timings,
     )
-    if not passages:
+    if small_talk is not None:
+        # Not a claim about the documents: nothing to cite, so no receipt either.
+        result.answer, result.status = small_talk, AnswerStatus.ANSWERED
+        result.metadata["conversational"] = True
+        yield AnswerDelta(small_talk)
+    elif not passages:
         yield AnswerDelta(INSUFFICIENT_MESSAGE)
     else:
         outcome = _Outcome()

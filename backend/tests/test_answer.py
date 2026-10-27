@@ -16,6 +16,7 @@ from app.providers.llm import LLMError, LLMUnavailableError
 from app.rag.answer import ERROR_MESSAGE, REFUSED_MESSAGE, answer_question, stream_answer
 from app.rag.extractive import INSUFFICIENT_MESSAGE
 from app.rag.prompts import SYSTEM_PROMPT
+from app.rag.query import INTRO_REPLY, THANKS_REPLY
 from app.rag.types import (
     AnswerCompleted,
     AnswerDelta,
@@ -213,6 +214,20 @@ def test_no_passages_means_a_fixed_abstention_and_no_model_call(ask, tenant, han
     assert result.passages == [] and result.citations == []
     assert llm.requests == []
     assert "generation" not in result.timings_ms and "total" in result.timings_ms
+
+
+def test_small_talk_gets_a_fixed_reply_without_retrieval_or_a_model_call(ask, tenant, handbook):
+    llm = FakeLLM()
+    for message, reply in (
+        ("Hey can I ask you questions?", INTRO_REPLY),
+        ("Thanks!", THANKS_REPLY),
+    ):
+        result = ask(tenant.viewer, tenant.org, message, llm=llm, history=HISTORY)
+        assert (result.status, result.answer) == (AnswerStatus.ANSWERED, reply)
+        assert result.metadata == {"conversational": True}
+        assert result.retrieval.candidates == [] and result.passages == []
+        assert result.citations == [] and result.claims == []
+    assert llm.requests == []  # neither the rewrite nor the answer model was asked
 
 
 def test_extractive_generator_answers_without_an_llm(ask, tenant, handbook):

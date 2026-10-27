@@ -7,7 +7,8 @@ it. Code: `backend/app/rag/` (`answer.py` pipeline, `prompts.py`, `citations.py`
 providers in [LLM_PROVIDERS.md](LLM_PROVIDERS.md).
 
 ```
-question ─► normalize_query ─► rewrite follow-up (history + LLM, or heuristic)
+question ─► normalize_query ─► only small talk: fixed reply, no retrieval, no model call
+         ─► rewrite follow-up (history + LLM, or heuristic)
          ─► retrieve(search_query) ─► build_context ─► S1..Sn passages
          ─► no passages: fixed abstention, no model call
          ─► LLM stream (or extractive generator) ─► STATUS line parsed and stripped
@@ -131,6 +132,18 @@ Overrides and flags:
 * Quotations: spans of 20+ characters in straight, curly or guillemet quotes must appear in
   some supplied passage after whitespace, quote-style and case normalization; otherwise
   they are listed in `unverified_quotes`. The text is not altered.
+
+## Small talk
+
+A message that is only a greeting, thanks or a question about the assistant ("Hey, can I
+ask you questions?", "What can you do?", "Thanks!") is not a question for the documents.
+`small_talk_reply` (`query.py`) matches the whole message, case folded and without
+punctuation, against a short list of English phrases; "Hi, how many leave days do I get?"
+does not match and goes through the pipeline. A match gets a fixed reply (what the
+assistant does, or an acknowledgement) with status `answered`, no passages, citations or
+receipt, and `metadata["conversational"] = True`. Nothing is retrieved and no model is
+called, so it works without an LLM and costs no tokens. Small talk in other languages goes
+through the pipeline like any other question.
 
 ## Abstention
 
